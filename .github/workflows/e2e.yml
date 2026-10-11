@@ -24,12 +24,19 @@ on:
 env:
   UPSTREAM_RELEASE: v5.6.283
 
+# These jobs run repository-controlled code (tests, scripts): read-only
+# token, and no credentials left in the checkout for that code to find.
+permissions:
+  contents: read
+
 jobs:
   tier1-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -69,6 +76,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -110,6 +119,8 @@ jobs:
           - 11434:11434
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Wait for the Ollama server
         run: |
           for _ in $(seq 1 60); do

@@ -37,9 +37,19 @@ variables; this repo only sets `GD_PORTABLE_BUILD`:
   `APPLEIDPASS`, `APPLETEAMID` are set (it skips quietly when `APPLEID`
   is absent).
 
-So signing is a matter of supplying credentials as GitHub Actions
-secrets and dropping `GD_PORTABLE_BUILD` for that OS job — no build
-code needs to change.
+So upstream's build code needs no change — but `release.yml` does, and
+differently per OS:
+
+- **Windows:** supply the credentials as GitHub Actions secrets and drop
+  `GD_PORTABLE_BUILD` for `build-windows`.
+- **macOS:** the same, **and remove the ad-hoc step.** `build-macos`
+  builds the bare `.app` (`--mac dir`), then runs
+  `codesign --force --deep --sign -`, which would *replace* a Developer
+  ID signature with an ad-hoc one — after notarization, at that. A signed
+  macOS job must build the normal targets, skip that step, and verify
+  what it actually ships (`codesign --verify --deep --strict`,
+  `spctl --assess --type execute`, `xcrun stapler validate`) before
+  upload.
 
 ## Options
 

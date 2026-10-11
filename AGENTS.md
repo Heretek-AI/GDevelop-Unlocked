@@ -33,7 +33,7 @@
 ## Test commands
 
 ```bash
-npm test                                    # everything (must be 129/129+)
+npm test                                    # everything (must be 131/131+)
 npm run test:integration                     # tests/integration/ only
 node scripts/apply-patches.mjs --check      # seam gate
 node scripts/apply-patches.mjs --verify-only --target <patched-tree>  # marker contract, read-only

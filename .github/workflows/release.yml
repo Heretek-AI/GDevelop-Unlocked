@@ -57,6 +57,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: unlocked
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -105,11 +106,17 @@ jobs:
             --disable-dev-shm-usage --user-data-dir="$REL/profile" \
             --heretek-smoke > "$REL/smoke.log" 2>&1 || true
           node unlocked/scripts/assert-smoke-verdict.mjs "$REL/smoke.log"
+      - name: Checksums for exactly the files this job uploads
+        run: |
+          cd upstream/newIDE/electron-app/dist
+          sha256sum -- *.zip > SHA256SUMS-linux.txt && cat SHA256SUMS-linux.txt
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: gdevelop-unlocked-linux-x64-${{ inputs.upstream_ref }}
-          path: upstream/newIDE/electron-app/dist/*.zip
+          path: |
+            upstream/newIDE/electron-app/dist/*.zip
+            upstream/newIDE/electron-app/dist/SHA256SUMS-linux.txt
           if-no-files-found: error
 
   build-windows:
@@ -125,6 +132,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: unlocked
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -178,6 +186,10 @@ jobs:
           "$BIN" --no-sandbox --disable-gpu --user-data-dir="$REL/profile" \
             --heretek-smoke > "$REL/smoke.log" 2>&1 || true
           node unlocked/scripts/assert-smoke-verdict.mjs "$REL/smoke.log"
+      - name: Checksums for exactly the files this job uploads
+        run: |
+          cd upstream/newIDE/electron-app/dist
+          sha256sum -- *.exe *.zip > SHA256SUMS-windows.txt && cat SHA256SUMS-windows.txt
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -185,6 +197,7 @@ jobs:
           path: |
             upstream/newIDE/electron-app/dist/*.exe
             upstream/newIDE/electron-app/dist/*.zip
+            upstream/newIDE/electron-app/dist/SHA256SUMS-windows.txt
           if-no-files-found: error
 
   build-macos:
@@ -195,6 +208,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: unlocked
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -261,11 +275,17 @@ jobs:
           OUT="upstream/newIDE/electron-app/dist/GDevelop-Unlocked-mac-universal.zip"
           ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT"
           ls -lh "$OUT"
+      - name: Checksums for exactly the files this job uploads
+        run: |
+          cd upstream/newIDE/electron-app/dist
+          shasum -a 256 GDevelop-Unlocked-mac-universal.zip > SHA256SUMS-macos.txt && cat SHA256SUMS-macos.txt
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: gdevelop-unlocked-macos-universal-${{ inputs.upstream_ref }}
-          path: upstream/newIDE/electron-app/dist/GDevelop-Unlocked-mac-universal.zip
+          path: |
+            upstream/newIDE/electron-app/dist/GDevelop-Unlocked-mac-universal.zip
+            upstream/newIDE/electron-app/dist/SHA256SUMS-macos.txt
           if-no-files-found: error
 
   publish:
@@ -286,8 +306,14 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: List what will be published
-        run: ls -lh dist && (cd dist && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      # Each OS job ships its own SHA256SUMS-<os>.txt next to its files, so
+      # publishing one OS later replaces that OS's files AND its sums
+      # together and never leaves another OS's sums stale.
+      - name: List and re-verify what will be published
+        run: |
+          ls -lh dist
+          cd dist
+          for sums in SHA256SUMS-*.txt; do sha256sum --check "$sums"; done
       - name: Publish GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
@@ -304,6 +330,6 @@ jobs:
             - **Unsigned.** These builds carry no publisher signature. Windows SmartScreen and macOS Gatekeeper will warn; on macOS, right-click → Open, or clear the quarantine flag (`xattr -dr com.apple.quarantine "GDevelop 5.app"`). The macOS app is ad-hoc signed only so Apple Silicon can launch it.
             - **Auto-update is disabled by design.** The build ships no update feed; a stock update would replace the patched app. Download each new release from this page.
             - Not affiliated with or supported by the GDevelop team. Analytics and other non-AI network behavior are unchanged from upstream.
-            - Verify downloads against `SHA256SUMS.txt`.
+            - Verify downloads against the `SHA256SUMS-<os>.txt` file for your platform.
           files: dist/*
           fail_on_unmatched_files: true

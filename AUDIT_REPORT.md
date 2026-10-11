@@ -1,5 +1,10 @@
 # AUDIT REPORT — GDevelop-Unlocked adversarial audit (2026-10-11)
 
+> **How to read this:** the report is append-only. §1–§6 are the original
+> audit and are kept as written — including a FAIL verdict and "OPEN"
+> rows that later sections close. **The current status is the last
+> addendum (§9)**; §7 and §8 are the steps in between.
+
 - Audited commit: `13ddde2` (`feature/ci-e2e`) + remediation in working tree.
 - Fixtures: upstream `review/GDevelop @ 8301cdcaa4`, donor fork `review/GDevelop-Heretek @ f7d450a1d9a`.
 - Full suite at report time: **96/96 green** (32 suites), `apply-patches.mjs --check` green.
@@ -209,7 +214,7 @@ loop (B) and live-browser XHR proof (D), both still open follow-ups;
 ## 9. Verification + layer-3 addendum (2026-10-11, later session)
 
 Work is on branch `handoff/verify-and-tracker-2026-10-11`; `main` is
-unchanged. Suite on the branch: **129/129** (39 suites); `main` re-verified
+unchanged. Suite on the branch: **131/131** (39 suites); `main` re-verified
 at 102/102 first. Layer-3 = the CI artifact from run `38106050979` driven
 headless over the DevTools protocol (Electron 32.3.3 / Chromium 128),
 logged out.

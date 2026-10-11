@@ -8,11 +8,18 @@ on:
     - cron: '0 6 * * 1' # weekly drift check against upstream baseline
   workflow_dispatch: # lets the suite be run on a work branch before a PR
 
+# These jobs run repository-controlled code (tests, scripts): read-only
+# token, and no credentials left in the checkout for that code to find.
+permissions:
+  contents: read
+
 jobs:
   seams:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22 # package.json engines: >=22
