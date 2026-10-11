@@ -13,17 +13,17 @@ name: release
 on:
   workflow_dispatch:
     inputs:
-      upstream_tag:
-        description: 'Upstream tag to build (e.g. v5.6.283)'
+      upstream_ref:
+        description: 'Upstream git ref to build (tag or commit; must match the patches — see UPSTREAM_BASELINE.json)'
         required: true
-        default: 'v5.6.283'
+        default: '8301cdcaa48b496f48a28a6e3a56fa833eaeddff'
       publish:
         description: 'Publish GitHub release after green smoke (true) or upload artifact only (false)'
         required: false
         default: 'false'
 
 env:
-  UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+  UPSTREAM_REF: ${{ inputs.upstream_ref }}
 
 jobs:
   build-linux:
@@ -36,9 +36,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Clone upstream source at tag
+      - name: Clone upstream source at ref
         run: |
-          git clone --depth 1 --branch "$UPSTREAM_TAG" https://github.com/4ian/GDevelop upstream
+          git clone https://github.com/4ian/GDevelop upstream
+          git -C upstream checkout "$UPSTREAM_REF"
       - name: Apply all patches + Tier-2 overlay (fails loudly on drift)
         run: |
           node unlocked/scripts/apply-patches.mjs --target "$GITHUB_WORKSPACE/upstream"
@@ -92,15 +93,15 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gdevelop-unlocked-linux-x64-${{ inputs.upstream_tag }}
+          name: gdevelop-unlocked-linux-x64-${{ inputs.upstream_ref }}
           path: upstream/newIDE/electron-app/dist/*.zip
       - name: Publish GitHub release
         if: inputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: unlocked-${{ inputs.upstream_tag }}
-          name: GDevelop-Unlocked ${{ inputs.upstream_tag }}
+          tag_name: unlocked-${{ inputs.upstream_ref }}
+          name: GDevelop-Unlocked ${{ inputs.upstream_ref }}
           body: |
-            Full build from patched upstream ${{ inputs.upstream_tag }} (11 patches + Tier-2 overlay + launcher hook).
+            Full build from patched upstream ${{ inputs.upstream_ref }} (11 patches + Tier-2 overlay + launcher hook).
             Unsigned portable build. Auto-update DISABLED by design — re-download per release, never auto-updated over.
           files: upstream/newIDE/electron-app/dist/*.zip
