@@ -14,7 +14,12 @@
 // `isCustomEndpointEnabled` here is pure (takes the endpoint config);
 // reading localStorage (`gd-custom-ai-config`) stays with the caller
 // (CustomAIClient.getCustomEndpointConfig), which the patch wires in.
-const LOCAL_AI_REQUEST_ID_PREFIX = 'local-ai-';
+//
+// Delivery note: the shipped renderer does NOT import this module —
+// patch 07 inlines the same predicates (see README.md, "Duplication
+// contract"). tests/integration/shim-wiring-contract.test.mjs pins the
+// inlined copies to this reference, starting with the prefix below.
+export const LOCAL_AI_REQUEST_ID_PREFIX = 'local-ai-';
 
 /** True for BYOK-local request ids (`local-ai-*`). */
 export function isLocalAiRequestId(aiRequestId) {
