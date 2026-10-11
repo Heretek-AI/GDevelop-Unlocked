@@ -55,23 +55,38 @@ function loadedPublishValue(abs) {
 
 const root = path.resolve(process.argv[2] || '.');
 const abs = path.join(root, CONFIG_REL);
-if (!fs.existsSync(abs)) {
+// One descriptor for the whole read-modify-write: the file that was
+// inspected is the file that gets rewritten (no check-then-reopen by path).
+let fd;
+try {
+  fd = fs.openSync(abs, 'r+');
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
   console.error(`[strip-updater-feed] missing: ${abs}`);
   process.exit(2);
 }
-const before = fs.readFileSync(abs, 'utf8');
-if (NEUTERED.test(before)) {
-  console.log('[strip-updater-feed] publish already null — neutered.');
-} else if (!before.includes('publish:')) {
-  console.error(
-    '[strip-updater-feed] no `publish:` key in the build config. ' +
+let refusal = null;
+try {
+  const before = fs.readFileSync(fd, 'utf8');
+  if (NEUTERED.test(before)) {
+    console.log('[strip-updater-feed] publish already null — neutered.');
+  } else if (!before.includes('publish:')) {
+    refusal =
+      '[strip-updater-feed] no `publish:` key in the build config. ' +
       'electron-builder would then derive the update feed from ' +
-      'package.json `repository` — refusing to call that neutered.'
-  );
+      'package.json `repository` — refusing to call that neutered.';
+  } else {
+    const after = neuterPublishBlock(before);
+    fs.ftruncateSync(fd, 0);
+    fs.writeSync(fd, after, 0, 'utf8');
+    console.log(`[strip-updater-feed] set publish: null in ${CONFIG_REL}`);
+  }
+} finally {
+  fs.closeSync(fd);
+}
+if (refusal) {
+  console.error(refusal);
   process.exit(1);
-} else {
-  fs.writeFileSync(abs, neuterPublishBlock(before));
-  console.log(`[strip-updater-feed] set publish: null in ${CONFIG_REL}`);
 }
 const publish = loadedPublishValue(abs);
 if (publish !== null) {
