@@ -10,13 +10,17 @@
 //     (patches are not idempotent by design — a green second run would
 //     mean the hunks never matched).
 //
+//   node scripts/apply-patches.mjs --verify-only --target <patched-tree>
+//     Read-only post-apply contract check (MARKERS + byte-equal launcher
+//     and Tier-2 overlay) on an already-patched tree. No seam run, no
+//     filesystem changes. Exit 1 lists every missing marker/leftover gate.
+//
 //   node scripts/apply-patches.mjs --asar app.asar --out app.patched.asar
-//     Full CI path: extract with the Electron `asar` tool, apply as above,
-//     repack. NOTE: a production asar holds bundled/minified JS, so the
-//     source-level hunks in patches/ will NOT match bundle output — the
-//     driver says so loudly instead of pretending. Bundle-mapped hunks
-//     must be authored from a real `electron-app` build before this mode
-//     can go green (tracked in issue #2 acceptance: smoke launch).
+//     Only for an asar that holds SOURCE (newIDE/ at top level). A
+//     release asar holds bundled/minified JS, so the source-level hunks
+//     in patches/ will NOT match — the driver says so loudly instead of
+//     pretending. For release artifacts use the launcher-only path:
+//     scripts/inject-launcher.mjs --appdir (see launcher/README.md).
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -232,6 +236,7 @@ function parseArgs(argv) {
     else if (a === '--asar') out.asar = path.resolve(argv[++i]);
     else if (a === '--out') out.out = path.resolve(argv[++i]);
     else if (a === '--no-verify') out.noVerify = true;
+    else if (a === '--verify-only') out.verifyOnly = true;
   }
   return out;
 }
@@ -419,7 +424,10 @@ function verifyTarget(target) {
     console.error(`[verify] ${failed} marker check(s) failed.`);
     process.exit(1);
   }
-  console.log('[verify] all Tier-1 unlock markers present, gates gone.');
+  console.log(
+    '[verify] all unlock markers present (Tier-1 + Tier-2), launcher + ' +
+      'Tier-2 overlay byte-equal, gates gone.'
+  );
 }
 
 function extractAsar(asar, dest) {
@@ -454,6 +462,17 @@ if (args.check && !args.target && !args.asar) {
   process.exit(0);
 }
 
+if (args.verifyOnly) {
+  if (!args.target) {
+    console.error(
+      'Usage: node scripts/apply-patches.mjs --verify-only --target <patched-tree>'
+    );
+    process.exit(2);
+  }
+  verifyTarget(args.target);
+  process.exit(0);
+}
+
 runSeamTests();
 
 if (args.asar) {
@@ -468,9 +487,9 @@ if (args.asar) {
     console.log(`[apply-patches] extracting ${args.asar} ...`);
     extractAsar(args.asar, workdir);
     console.log(
-      '[apply-patches] NOTE: production asars hold bundled/minified JS; ' +
-        'source-level hunks are expected to fail here until bundle-mapped ' +
-        'hunks are authored from a real electron-app build (issue #2).'
+      '[apply-patches] NOTE: release asars hold bundled/minified JS; ' +
+        'source-level hunks cannot match there. For a release artifact ' +
+        'use scripts/inject-launcher.mjs --appdir (launcher/README.md).'
     );
     applyToTarget(workdir);
     syncLauncherFiles(workdir);
@@ -498,6 +517,7 @@ console.error(
   'Usage:\n' +
     '  node scripts/apply-patches.mjs --check\n' +
     '  node scripts/apply-patches.mjs --target <upstream-checkout>\n' +
+    '  node scripts/apply-patches.mjs --verify-only --target <patched-tree>\n' +
     '  node scripts/apply-patches.mjs --asar <app.asar> --out <patched.asar>'
 );
 process.exit(2);

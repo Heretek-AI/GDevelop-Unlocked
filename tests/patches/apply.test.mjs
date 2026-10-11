@@ -39,6 +39,14 @@ const TIER1_FILES = [
   'newIDE/app/src/AiGeneration/Utils.js',
 ];
 
+function verifyOnly(dir) {
+  return spawnSync(
+    'node',
+    ['scripts/apply-patches.mjs', '--verify-only', '--target', dir],
+    { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' }
+  );
+}
+
 describe('patcher: Tier-1 hunks apply to pristine upstream', () => {
   let target;
   before(() => {
@@ -53,10 +61,12 @@ describe('patcher: Tier-1 hunks apply to pristine upstream', () => {
   });
   after(() => fs.rmSync(target, { recursive: true, force: true }));
 
-  it('dry-run is clean on the pristine tree', () => {
+  it('applies clean and passes the driver verify (full marker contract)', () => {
+    // No --no-verify: the driver's own MARKERS + overlay byte-check must
+    // hold in-suite, not just on a manual scratch apply (audit G3).
     const r = spawnSync(
       'node',
-      ['scripts/apply-patches.mjs', '--target', target, '--no-verify'],
+      ['scripts/apply-patches.mjs', '--target', target],
       { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' }
     );
     assert.equal(
@@ -64,6 +74,7 @@ describe('patcher: Tier-1 hunks apply to pristine upstream', () => {
       0,
       `patcher failed on pristine tree:\n${r.stdout}\n${r.stderr}`
     );
+    assert.ok(r.stdout.includes('[verify] all unlock markers present'));
   });
 
   it('patched tree carries the unlock markers and no gates', () => {
@@ -111,6 +122,72 @@ describe('patcher: Tier-1 hunks apply to pristine upstream', () => {
       !dbg.includes('this._subscriptionChecker.checkUserHasSubscription()')
     );
   });
+
+  it('--verify-only is green on the patched tree and changes nothing', () => {
+    const usage = path.join(target, TIER1_FILES[0]);
+    const before = fs.statSync(usage).mtimeMs;
+    const r = verifyOnly(target);
+    assert.equal(r.status, 0, `verify-only failed:\n${r.stdout}\n${r.stderr}`);
+    assert.equal(fs.statSync(usage).mtimeMs, before);
+  });
+
+  // Negative controls: one per failure class the verifier reports. Each
+  // tampers a throwaway copy, so the tree under test stays intact.
+  for (const { name, tamper, expected } of [
+    {
+      name: 'a leftover gate',
+      tamper: dir =>
+        fs.appendFileSync(
+          path.join(dir, TIER1_FILES[4]),
+          '\n// if (this.hotReloadsCount % 16 === 0) {}\n'
+        ),
+      expected: '[verify] LEFTOVER gate',
+    },
+    {
+      name: 'a missing unlock marker',
+      tamper: dir => {
+        const abs = path.join(dir, TIER1_FILES[5]);
+        fs.writeFileSync(
+          abs,
+          fs
+            .readFileSync(abs, 'utf8')
+            .replace('// Unlocked in GDevelop-Heretek', '// (marker removed)')
+        );
+      },
+      expected: '[verify] MISSING marker',
+    },
+    {
+      name: 'a stale Tier-2 overlay file',
+      tamper: dir =>
+        fs.appendFileSync(
+          path.join(dir, 'newIDE/app/src/AI/CustomAIClient.js'),
+          '\n// drift\n'
+        ),
+      expected: '[verify] STALE Tier-2 runtime file',
+    },
+    {
+      name: 'a missing launcher file',
+      tamper: dir =>
+        fs.rmSync(path.join(dir, 'newIDE/electron-app/app/unlock-payloads.cjs')),
+      expected: '[verify] MISSING launcher file',
+    },
+  ]) {
+    it(`--verify-only fails on ${name}`, () => {
+      const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'tier1-verify-neg-'));
+      try {
+        fs.cpSync(target, copy, { recursive: true });
+        tamper(copy);
+        const r = verifyOnly(copy);
+        assert.equal(r.status, 1, `verify accepted ${name}:\n${r.stdout}`);
+        assert.ok(
+          r.stderr.includes(expected),
+          `expected "${expected}" in:\n${r.stderr}`
+        );
+      } finally {
+        fs.rmSync(copy, { recursive: true, force: true });
+      }
+    });
+  }
 
   it('second apply fails (hunks already consumed)', () => {
     const r = spawnSync(
