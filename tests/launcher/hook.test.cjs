@@ -29,18 +29,25 @@ function makeFakeElectron() {
       this.id = 7;
     }
   }
-  return {
-    electron: {
-      BrowserWindow: FakeWindow,
-      app: { on: (event, cb) => (listeners[event] = cb) },
-      session: {
-        defaultSession: {
-          webRequest: {
-            onBeforeRequest: (filter, cb) => webRequests.push({ filter, cb }),
-          },
+  // Mirror real Electron: BrowserWindow is a getter-only lazy binding,
+  // so direct assignment throws and the hook must redefine the property.
+  const exportsObj = {
+    app: { on: (event, cb) => (listeners[event] = cb) },
+    session: {
+      defaultSession: {
+        webRequest: {
+          onBeforeRequest: (filter, cb) => webRequests.push({ filter, cb }),
         },
       },
     },
+  };
+  Object.defineProperty(exportsObj, 'BrowserWindow', {
+    configurable: true,
+    enumerable: true,
+    get: () => FakeWindow,
+  });
+  return {
+    electron: exportsObj,
     listeners,
     webRequests,
     FakeWindow,
@@ -92,6 +99,67 @@ describe('hook: window wrap', () => {
   });
 });
 
+describe('hook: real-Electron regressions', () => {
+  it('wraps getter-only BrowserWindow exports (prod failure)', () => {
+    const { electron } = makeFakeElectron();
+    const { logger } = makeLogger();
+    // Sanity: the fake really is getter-only like production Electron.
+    assert.throws(() => {
+      'use strict';
+      electron.BrowserWindow = function () {};
+    }, TypeError);
+    const result = hook.installPreloadHook(electron, {
+      logger,
+      skipUpdaterWatch: true,
+    });
+    assert.equal(result.wrapped, true);
+    const win = new electron.BrowserWindow({});
+    assert.ok(
+      String(win.options.webPreferences.preload).endsWith(
+        'preload-unlock.cjs'
+      )
+    );
+  });
+
+  it('defers webRequest setup until app ready (prod failure)', async () => {
+    const webRequests = [];
+    const readyCbs = [];
+    let ready = false;
+    const session = {
+      webRequest: {
+        onBeforeRequest: (filter, cb) => webRequests.push({ filter, cb }),
+      },
+    };
+    const electron = {
+      BrowserWindow: function FakeWindow(options) {
+        this.options = options;
+      },
+      app: {
+        on: () => {},
+        whenReady: () =>
+          new Promise(resolve => readyCbs.push(() => resolve())),
+      },
+      get session() {
+        if (!ready) throw new Error('Session can only be received');
+        return { defaultSession: session };
+      },
+    };
+    const { logger } = makeLogger();
+    const result = hook.installPreloadHook(electron, {
+      logger,
+      skipUpdaterWatch: true,
+    });
+    assert.equal(result.webRequestDeferred, true);
+    assert.equal(webRequests.length, 0);
+    ready = true;
+    readyCbs.forEach(cb => cb());
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(webRequests.length, 1);
+    assert.deepEqual(webRequests[0].filter, {
+      urls: [`${USAGE_API_BASE}/*`],
+    });
+  });
+});
 describe('hook: pop-out fallback', () => {
   it('seeds windows that missed the preload via executeJavaScript', async () => {
     const { electron, listeners } = makeFakeElectron();

@@ -25,7 +25,7 @@ need a human owner. Do not close issue #6 until every box is ticked.
 2. Mark the fork read-only: repository Settings → Archive, with the
    description pointing here:
    `Retired as delivery vehicle; Tier-2 donor archive for
-   Heretek-AI/GDevelop-Unlocked. Donor commit b9109cfbaaaf19c31b5af4d315317fb67d8903c3.`
+   Heretek-AI/GDevelop-Unlocked. Donor commit f7d450a1d9aa068e33c0a0c9a3f9caaee3701f2f.`
 3. After archiving, Tier-1 ships only as `patches/` + `launcher/`
    (Phases 2–3); Tier-2 only as versioned `packages/ai-studio`
    (Phase 4). Any future fork-sync need is a `scripts/extract-tier2.mjs`

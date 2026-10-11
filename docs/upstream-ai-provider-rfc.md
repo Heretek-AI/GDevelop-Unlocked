@@ -63,3 +63,23 @@ interface AiProvider {
 
 Client-side entitlement unlocks, splash/watermark/debugger/preview
 gating changes, build-quota changes, or any auto-updater/feed changes.
+
+## Addendum (adversarial audit, 2026-10-11)
+
+Two further narrowly-scoped, independently reviewable changes from
+AUDIT_REPORT.md §6, in the same spirit (no policy content):
+
+1. **Early-return upload bypass (the patch-09 pattern).** When a custom
+   endpoint is active, `prepareAiUserContent` returns the inlined project
+   JSON with null storage keys instead of requesting presigned upload
+   URLs. No hosted traffic, zero behavior change for hosted users.
+2. **Credit-read hardening.** `getAvailableCredits(limits)` returns 0 on
+   absent/partial responses instead of throwing on chat render; send
+   gating still defers to the existing `canPayForAiRequest` rule.
+
+Compatibility note for any upstream discussion of the fork's Generation /
+Preferences / AskAi diffs: those verbatim deltas **delete upstream-new
+code** (chat attachments #9135/#9162, `newEffectDialogDefaultTab` #9136 —
+see AUDIT_REPORT.md §3). Only the additive early-return/credit-hardening
+patterns above are safe to propose; the deletions must be rebased away
+first and must never appear in an upstream PR.

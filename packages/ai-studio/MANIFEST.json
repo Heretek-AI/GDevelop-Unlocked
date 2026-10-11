@@ -73,8 +73,9 @@
     },
     "dev-harness/mock-ai-provider.js": {
       "donor": "scripts/dev/mock-ai-provider.js",
-      "bytes": 9858,
-      "sha256": "8840bec1a98385c106deaa78aaec5b18fdf98b54a944fc9413ee5916679150ca"
+      "bytes": 9862,
+      "sha256": "117611628583d61a41e0f26de0ea0bfe30fd9b6781127e853995ff964cdfc1f1",
+      "note": "ESM port (import instead of require): repo root is type:module so the verbatim CJS donor throws ReferenceError. Behavior identical; exempt from donor byte-identity in extract.test.mjs."
     },
     "dev-harness/mock-script.example.json": {
       "donor": "scripts/dev/mock-script.example.json",

@@ -1,0 +1,616 @@
+--- a/newIDE/app/src/AiGeneration/AskAiEditorContainer.js
++++ b/newIDE/app/src/AiGeneration/AskAiEditorContainer.js
+@@ -20,7 +20,7 @@
+ import { type ObjectWithContext } from '../ObjectsList/EnumerateObjects';
+ import Paper from '../UI/Paper';
+ import { AiRequestChat, type AiRequestChatInterface } from './AiRequestChat';
+-import { canPayForAiRequest } from './AiRequestChat/Utils';
++import { canAffordAiRequest, getAvailableCredits } from './AiRequestChat/Utils';
+ import { registerAskAiPrefillListener } from './AskAiPrefill';
+ import {
+   getLatestInGameEditorExtensionErrors,
+@@ -50,12 +50,28 @@
+   canUpgradeSubscription,
+   hasValidSubscriptionPlan,
+ } from '../Utils/GDevelopServices/Usage';
++import {
++  isCustomEndpointEnabled,
++  customAbortPendingCreateAiRequests,
++  loadLocalAiRequests,
++  customGetAiRequest,
++  LOCAL_BYOK_USER_ID,
++} from '../AI/CustomAIClient';
+ import { retryIfFailed } from '../Utils/RetryIfFailed';
+ import { type EditorCallbacks } from '../EditorFunctions';
+ import {
++  isFailedAiRequestStart,
++  canRetryAiRequestForSession,
++  canSendFeedbackForSession,
+   aiRequestHasWorkInProgress,
++  canSendAiRequestForSession,
++  canStartAiRequestCreate,
+   getFunctionCallOutputsFromEditorFunctionCallResults,
+   getFunctionCallsToProcess,
++  getUnselectedActiveRequests,
++  UNSELECTED_ACTIVE_WINDOW_MS,
++  MAX_UNSELECTED_ACTIVE_REQUESTS,
++  shouldFetchAiRequestOnTabOpen,
+ } from './AiRequestUtils';
+ import { type EditorFunctionCallResult } from '../EditorFunctions';
+ import { useStableUpToDateRef } from '../Utils/UseStableUpToDateCallback';
+@@ -77,6 +93,8 @@
+ import UrlStorageProvider from '../ProjectsStorage/UrlStorageProvider';
+ import { prepareAiUserContent } from './PrepareAiUserContent';
+ import { AiRequestContext } from './AiRequestContext';
++import { useStudioRuntime } from './Studio/UseStudioRuntime';
++import { useStudioNudge } from './Studio/UseStudioNudge';
+ import { getAiConfigurationPresetsWithAvailability } from './AiConfiguration';
+ import {
+   setEditorHotReloadNeeded,
+@@ -555,6 +573,7 @@
+         requestEditApproval,
+         resolveEditApproval,
+         setIsFetchingSuggestions,
++        activateSubAgent,
+       } = React.useContext(AiRequestContext);
+       const {
+         getEditorFunctionCallResults,
+@@ -580,13 +599,27 @@
+       const authenticatedUser = React.useContext(AuthenticatedUserContext);
+       const {
+         profile,
+-        getAuthorizationHeader,
++        getAuthorizationHeader: rawGetAuthorizationHeader,
+         onOpenCreateAccountDialog,
+         limits,
+         onRefreshLimits,
+         subscription,
+       } = authenticatedUser;
+ 
++      const getAuthorizationHeader = React.useCallback(
++        async (): Promise<string> => {
++          try {
++            return await rawGetAuthorizationHeader();
++          } catch (error) {
++            if (isCustomEndpointEnabled()) {
++              return 'Bearer local-byok-token';
++            }
++            throw error;
++          }
++        },
++        [rawGetAuthorizationHeader]
++      );
++
+       const { isRefreshingLimits, refreshLimits } = useRefreshLimits(
+         onRefreshLimits
+       );
+@@ -594,13 +627,13 @@
+         false
+       );
+ 
+-      const availableCredits = limits ? limits.credits.userBalance.amount : 0;
++      const availableCredits = getAvailableCredits(limits);
+       const quota =
+         (limits && limits.quotas && limits.quotas['consumed-ai-credits']) ||
+         null;
+-      const aiRequestPrice =
+-        (limits && limits.credits && limits.credits.prices['ai-request']) ||
+-        null;
++      // Deep-walked behind a partial-response guard: getUserLimits validates
++      // only the top-level `capabilities` key, so `credits.prices` is unverified.
++      const aiRequestPrice = limits?.credits?.prices?.['ai-request'] || null;
+       const aiRequestPriceInCredits = aiRequestPrice
+         ? aiRequestPrice.priceInCredits
+         : null;
+@@ -625,12 +658,14 @@
+             if (!newAiRequestOptions) return;
+             console.info('Starting a new AI request...');
+ 
+-            if (!profile) {
++            if (!canStartAiRequestCreate(profile, isCustomEndpointEnabled())) {
+               onOpenCreateAccountDialog();
+               startNewAiRequest(null);
+               return;
+             }
+ 
++            const activeUserId = profile ? profile.id : LOCAL_BYOK_USER_ID;
++
+             // Read the options and reset them (to avoid launching the same request twice).
+             const {
+               mode,
+@@ -643,13 +678,21 @@
+             // Ensure the user has enough credits to pay for the request, or ask them
+             // to buy some more.
+             let payWithCredits = false;
+-            if (quota && quota.limitReached && aiRequestPriceInCredits) {
++            if (
++              quota &&
++              quota.limitReached &&
++              aiRequestPriceInCredits &&
++              !isCustomEndpointEnabled()
++            ) {
+               payWithCredits = true;
+             }
+             // The same rule as the one enabling the send button, so the button
+-            // can't offer to send a request this would silently drop.
++            // can't offer to send a request this would silently drop. Local/BYOK
++            // (custom endpoint) never depends on hosted credits/quota.
+             if (
+-              !canPayForAiRequest({
++              !canAffordAiRequest({
++                isCustomEndpointEnabled: isCustomEndpointEnabled(),
++                userId: activeUserId,
+                 quota,
+                 price: aiRequestPrice,
+                 availableCredits,
+@@ -680,7 +723,7 @@
+ 
+               const preparedAiUserContent = await prepareAiUserContent({
+                 getAuthorizationHeader,
+-                userId: profile.id,
++                userId: activeUserId,
+                 simplifiedProjectJson,
+                 projectSpecificExtensionsSummaryJson,
+                 eventsJson: null,
+@@ -689,7 +732,7 @@
+               const aiRequest = await createAiRequest(getAuthorizationHeader, {
+                 userRequest: userRequest,
+                 attachmentIds,
+-                userId: profile.id,
++                userId: activeUserId,
+                 gameProjectJsonUserRelativeKey:
+                   preparedAiUserContent.gameProjectJsonUserRelativeKey,
+                 gameProjectJson: preparedAiUserContent.gameProjectJson,
+@@ -709,7 +752,6 @@
+                 },
+               });
+ 
+-              console.info('Successfully created a new AI request:', aiRequest);
+               setSendingAiRequest(null, false);
+               setIsSendingUserMessage(false);
+               updateAiRequest(aiRequest.id, () => aiRequest);
+@@ -720,24 +762,39 @@
+                 setSelectedAiRequestId(aiRequest.id);
+               }
+ 
+-              const aiRequestChatRefCurrent = aiRequestChatRef.current;
+-              if (aiRequestChatRefCurrent) {
+-                aiRequestChatRefCurrent.resetUserInput('');
+-                aiRequestChatRefCurrent.resetUserInput(selectedAiRequestId);
+-              }
++              // Local first-turn failures return status:'error' rather than
++              // throwing: show the error row (Retry → continue) but do not
++              // report a successful start or clear the user's draft.
++              if (isFailedAiRequestStart(aiRequest)) {
++                console.warn(
++                  'AI request created in error state:',
++                  aiRequest.error && aiRequest.error.message
++                );
++              } else {
++                console.info(
++                  'Successfully created a new AI request:',
++                  aiRequest
++                );
++
++                const aiRequestChatRefCurrent = aiRequestChatRef.current;
++                if (aiRequestChatRefCurrent) {
++                  aiRequestChatRefCurrent.resetUserInput('');
++                  aiRequestChatRefCurrent.resetUserInput(selectedAiRequestId);
++                }
+ 
+-              sendAiRequestStarted({
+-                simplifiedProjectJsonLength: simplifiedProjectJson
+-                  ? simplifiedProjectJson.length
+-                  : 0,
+-                projectSpecificExtensionsSummaryJsonLength: projectSpecificExtensionsSummaryJson
+-                  ? projectSpecificExtensionsSummaryJson.length
+-                  : 0,
+-                payWithCredits,
+-                storageProviderName,
+-                mode,
+-                aiRequestId: aiRequest.id,
+-              });
++                sendAiRequestStarted({
++                  simplifiedProjectJsonLength: simplifiedProjectJson
++                    ? simplifiedProjectJson.length
++                    : 0,
++                  projectSpecificExtensionsSummaryJsonLength: projectSpecificExtensionsSummaryJson
++                    ? projectSpecificExtensionsSummaryJson.length
++                    : 0,
++                  payWithCredits,
++                  storageProviderName,
++                  mode,
++                  aiRequestId: aiRequest.id,
++                });
++              }
+             } catch (error) {
+               console.error('Error starting a new AI request:', error);
+               setLastSendError(null, error);
+@@ -794,12 +851,28 @@
+           createdProject?: ?gdProject,
+           editorFunctionCallResults: Array<EditorFunctionCallResult>,
+         |}) => {
+-          if (!profile) return;
++          if (
++            !canSendAiRequestForSession(
++              profile,
++              isCustomEndpointEnabled(),
++              aiRequestId
++            )
++          )
++            return;
++
++          const activeUserId = profile ? profile.id : LOCAL_BYOK_USER_ID;
+           // Files can be sent without any text.
+           const hasUserMessage =
+             !!userMessage || !!(attachmentIds && attachmentIds.length);
+ 
+-          const aiRequestForMessage = aiRequests[aiRequestId];
++          const aiRequestForMessage =
++            aiRequests[aiRequestId] ||
++            // A local request that is being processed from the background (it
++            // lost selection but still had pending calls) may not be in the
++            // React state yet; the client cache is its source of truth.
++            (aiRequestId.startsWith('local-ai-')
++              ? customGetAiRequest(aiRequestId)
++              : null);
+           if (!aiRequestForMessage) return;
+ 
+           if (isSendingAiRequest(aiRequestId)) {
+@@ -830,17 +903,19 @@
+             console.info(
+               'Skipping send for AI request: some function call results are not finished yet.'
+             );
+-            return;
++            return false;
+           }
+           if (hasFunctionsCallsToProcess) {
+             console.info(
+               'Skipping send for AI request: there are still function calls to process.'
+             );
+-            return;
++            return false;
+           }
+ 
+           // If nothing to send, stop there.
+-          if (functionCallOutputs.length === 0 && !hasUserMessage) return;
++          // If nothing to send, stop there.
++          if (functionCallOutputs.length === 0 && !hasUserMessage)
++            return false;
+ 
+           // Paying with credits is only when a user message is sent (and quota is exhausted).
+           let payWithCredits = false;
+@@ -848,13 +923,17 @@
+             hasUserMessage &&
+             quota &&
+             quota.limitReached &&
+-            aiRequestPriceInCredits
++            aiRequestPriceInCredits &&
++            !isCustomEndpointEnabled()
+           ) {
+             payWithCredits = true;
+             // The same rule as the one enabling the send button, so the button
+             // can't offer to send a message this would silently drop.
+             if (
+-              !canPayForAiRequest({
++              !canAffordAiRequest({
++                isCustomEndpointEnabled: isCustomEndpointEnabled(),
++                userId: activeUserId,
++                aiRequestId,
+                 quota,
+                 price: aiRequestPrice,
+                 availableCredits,
+@@ -865,6 +944,7 @@
+             }
+           }
+ 
++          let aiRequest: AiRequest | void;
+           try {
+             setSendingAiRequest(aiRequestId, true);
+             // Sending takes over the UI: drop any in-flight best-effort
+@@ -894,7 +974,7 @@
+ 
+             const preparedAiUserContent = await prepareAiUserContent({
+               getAuthorizationHeader,
+-              userId: profile.id,
++              userId: activeUserId,
+               simplifiedProjectJson,
+               projectSpecificExtensionsSummaryJson,
+               eventsJson: null,
+@@ -926,9 +1006,9 @@
+                   })
+                 : { functionCallOutputs, newlyGivenErrorIds: [] };
+ 
+-            const aiRequest: AiRequest = await retryIfFailed({ times: 2 }, () =>
++            aiRequest = await retryIfFailed({ times: 2 }, () =>
+               addMessageToAiRequest(getAuthorizationHeader, {
+-                userId: profile.id,
++                userId: activeUserId,
+                 aiRequestId,
+                 functionCallOutputs: functionCallOutputsToSend,
+                 gameProjectJsonUserRelativeKey:
+@@ -961,26 +1041,43 @@
+             );
+             setSendingAiRequest(aiRequest.id, false);
+             setIsSendingUserMessage(false);
+-            clearEditorFunctionCallResults(aiRequest.id);
+ 
+-            if (hasUserMessage) {
+-              sendAiRequestMessageSent({
+-                simplifiedProjectJsonLength: simplifiedProjectJson
+-                  ? simplifiedProjectJson.length
+-                  : 0,
+-                projectSpecificExtensionsSummaryJsonLength: projectSpecificExtensionsSummaryJson
+-                  ? projectSpecificExtensionsSummaryJson.length
+-                  : 0,
+-                payWithCredits,
+-                mode: 'orchestrator',
+-                aiRequestId: aiRequest.id,
+-                outputLength: aiRequest.output ? aiRequest.output.length : 0,
+-              });
++            // Local mid-turn failures return status:'error' rather than
++            // throwing: keep the function-call results so Retry can continue,
++            // and do not report a successful message send / clear the draft.
++            if (isFailedAiRequestStart(aiRequest)) {
++              console.warn(
++                'AI message send returned error state:',
++                aiRequest.error && aiRequest.error.message
++              );
++            } else {
++              clearEditorFunctionCallResults(aiRequest.id);
++
++              if (hasUserMessage) {
++                sendAiRequestMessageSent({
++                  simplifiedProjectJsonLength: simplifiedProjectJson
++                    ? simplifiedProjectJson.length
++                    : 0,
++                  projectSpecificExtensionsSummaryJsonLength: projectSpecificExtensionsSummaryJson
++                    ? projectSpecificExtensionsSummaryJson.length
++                    : 0,
++                  payWithCredits,
++                  mode: 'orchestrator',
++                  aiRequestId: aiRequest.id,
++                  outputLength: aiRequest.output ? aiRequest.output.length : 0,
++                });
++              }
+             }
+ 
+             // Only once sent: the text and the files stay to send them again
+             // after an error.
+-            if (hasUserMessage && aiRequestId === selectedAiRequestId) {
++            const sendFailed =
++              !!aiRequest && isFailedAiRequestStart(aiRequest);
++            if (
++              hasUserMessage &&
++              aiRequestId === selectedAiRequestId &&
++              !sendFailed
++            ) {
+               const aiRequestChatRefCurrent = aiRequestChatRef.current;
+               if (aiRequestChatRefCurrent) {
+                 aiRequestChatRefCurrent.resetUserInput('');
+@@ -989,7 +1086,6 @@
+             }
+           } catch (error) {
+             console.error('Error while sending AI request message:', error);
+-            // TODO: update the label of the button to send again.
+             setLastSendError(aiRequestId, error);
+             setIsSendingUserMessage(false);
+           }
+@@ -1016,6 +1112,7 @@
+               onOpenExternalLayout(externalLayoutName);
+             });
+           }
++          return true;
+         },
+         [
+           profile,
+@@ -1047,10 +1144,13 @@
+       // charges back the usage it refunded when the request failed).
+       const onRetryAfterError = React.useCallback(
+         async () => {
+-          if (!selectedAiRequestId || !profile) return;
++          if (!selectedAiRequestId) return;
++          // Local BYOK chats retry through the local cache (no profile needed).
++          if (!canRetryAiRequestForSession(profile, selectedAiRequestId))
++            return;
+           try {
+             const aiRequest = await retryAiRequest(getAuthorizationHeader, {
+-              userId: profile.id,
++              userId: profile ? profile.id : LOCAL_BYOK_USER_ID,
+               aiRequestId: selectedAiRequestId,
+             });
+             updateAiRequest(aiRequest.id, () => aiRequest);
+@@ -1081,7 +1181,7 @@
+             createdProject?: ?gdProject,
+           |}
+         ) => {
+-          await onSendMessage({
++          return onSendMessage({
+             aiRequestId,
+             userMessage: '',
+             createdProject: options.createdProject,
+@@ -1094,29 +1194,54 @@
+       );
+ 
+       /**
+-       * Collect all AI requests to process: the selected request, and all sub-agent requests.
++       * Collect all AI requests to process: the selected request, all sub-agent
++       * requests, plus any just-active local request that lost selection.
+        */
+       const aiRequestsToProcess = React.useMemo(
+         () => {
+           const result = [];
++          const includedIds = new Set();
+           if (selectedAiRequest) {
+             result.push(selectedAiRequest);
++            includedIds.add(selectedAiRequest.id);
+           }
+           const subAgentIds = Object.keys(activeSubAgents);
+           for (const subAgentId of subAgentIds) {
+             const subAgentRequest = aiRequests[subAgentId];
+-            if (subAgentRequest) {
++            if (subAgentRequest && !includedIds.has(subAgentId)) {
+               result.push(subAgentRequest);
++              includedIds.add(subAgentId);
+             }
+           }
+-          return result;
++          // Keep a just-active local request moving even when it is no longer
++          // the selected chat: otherwise its pending function calls stall (see
++          // feedback-loop Run 4 - a mid-run initialize_project deselected the
++          // chat). The candidate set is the client cache, not the React state:
++          // an unselected request is not in `aiRequests` until it is fetched,
++          // but its live pending call is exactly the one that must run.
++          // Freshness-bounded so an old abandoned chat is never resumed.
++          const extraRequests = getUnselectedActiveRequests({
++            aiRequests: { ...loadLocalAiRequests(), ...aiRequests },
++            excludeIds: includedIds,
++            getEditorFunctionCallResults,
++            now: Date.now(),
++            freshnessWindowMs: UNSELECTED_ACTIVE_WINDOW_MS,
++            maxCount: MAX_UNSELECTED_ACTIVE_REQUESTS,
++          });
++          return result.concat(extraRequests);
+         },
+-        [selectedAiRequest, activeSubAgents, aiRequests]
++        [
++          selectedAiRequest,
++          activeSubAgents,
++          aiRequests,
++          getEditorFunctionCallResults,
++        ]
+       );
+ 
+       const {
+         onProcessFunctionCalls,
+         clearApprovedEditBatches,
++        enqueueRequestWrite,
+       } = useProcessFunctionCalls({
+         project,
+         fileMetadata,
+@@ -1124,6 +1249,7 @@
+         editorCallbacks,
+         aiRequestsToProcess,
+         onSendEditorFunctionCallResults,
++        isStudioEnabled: true,
+         getEditorFunctionCallResults,
+         addEditorFunctionCallResults,
+         onSceneEventsModifiedOutsideEditor,
+@@ -1146,6 +1272,33 @@
+         suspendAiRequest,
+         requestEditApproval,
+         onSaveProjectAsWithStorageProvider,
++        activateSubAgent,
++        updateAiRequest,
++        isSendingAiRequest,
++      });
++
++      // Closes the loop for locally spawned studio sub-agents: waits for a child
++      // to finish, reports it back to its parent, and updates the plan. A no-op
++      // when no sub-agent is active, so the hosted path is untouched.
++      useStudioRuntime({
++        aiRequests,
++        activeSubAgents,
++        getEditorFunctionCallResults,
++        updateAiRequest,
++        onSendEditorFunctionCallResults,
++        enqueueRequestWrite,
++      });
++
++      // Keeps the local manager moving when it plans, then ends its turn without
++      // delegating (BYOK-only, bounded, one nudge per plan state). A no-op for
++      // the hosted path and for sub-agent requests.
++      useStudioNudge({
++        selectedAiRequest,
++        aiRequests,
++        activeSubAgents,
++        getEditorFunctionCallResults,
++        isSendingAiRequest,
++        onSendMessage,
+       });
+ 
+       // Wrap onProcessFunctionCalls to bind the selected AI request for the chat UI.
+@@ -1284,11 +1437,11 @@
+           // $FlowFixMe[missing-local-annot]
+           freeFormDetails
+         ) => {
+-          if (!profile) return;
++          if (!canSendFeedbackForSession(profile, aiRequestId)) return;
+           try {
+             await retryIfFailed({ times: 2 }, () =>
+               sendAiRequestFeedback(getAuthorizationHeader, {
+-                userId: profile.id,
++                userId: profile ? profile.id : LOCAL_BYOK_USER_ID,
+                 aiRequestId,
+                 messageIndex,
+                 feedback,
+@@ -1318,7 +1471,11 @@
+ 
+       const onStop = React.useCallback(
+         async () => {
+-          if (!selectedAiRequest) return;
++          if (!selectedAiRequest) {
++            // New-chat form: cancel a hung local create before any AiRequest exists.
++            customAbortPendingCreateAiRequests();
++            return;
++          }
+           if (!getHasWorkInProgress()) return;
+           // Delegates to the provider so the suspend logic lives in a single
+           // place and also works when triggered outside of this editor.
+@@ -1442,14 +1599,24 @@
+ 
+       // Do a full fetch when the tab is opened to ensure the UI starts with
+       // up-to-date server state (e.g. request may have been suspended while
+-      // the tab was closed).
++      // the tab was closed). Offline BYOK / local-ai-* chats are cache-only
++      // and must refresh too — a bare `!profile` gate used to skip them.
+       React.useEffect(
+         () => {
+-          if (!selectedAiRequest || !profile) return;
++          if (
++            !shouldFetchAiRequestOnTabOpen({
++              selectedAiRequest,
++              profile,
++              customEndpointEnabled: isCustomEndpointEnabled(),
++            })
++          )
++            return;
++          const aiRequestId = selectedAiRequest ? selectedAiRequest.id : null;
++          if (!aiRequestId) return;
+           retryIfFailed({ times: 2 }, () =>
+             getAiRequest(getAuthorizationHeader, {
+-              userId: profile.id,
+-              aiRequestId: selectedAiRequest.id,
++              userId: profile ? profile.id : LOCAL_BYOK_USER_ID,
++              aiRequestId,
+             })
+           )
+             .then(aiRequest => {
+@@ -1703,9 +1870,13 @@
+             setForkingState(null);
+             await showAlert({
+               title: t`Error`,
+-              message: t`An error occurred while restoring the project version: ${
+-                error.message
+-              }`,
++              // A non-Error throw (a rejected promise with no reason) would
++              // throw again while building this message, replacing the alert
++              // with an unhandled error.
++              message: t`An error occurred while restoring the project version: ${(error &&
++                typeof error.message === 'string' &&
++                error.message) ||
++                'unknown error'}`,
+             });
+           }
+         },
+@@ -1795,7 +1966,9 @@
+                 lastSendError={getLastSendError(selectedAiRequestId)}
+                 quota={quota}
+                 increaseQuotaOffering={
+-                  !hasValidSubscriptionPlan(subscription)
++                  isCustomEndpointEnabled()
++                    ? 'none'
++                    : !hasValidSubscriptionPlan(subscription)
+                     ? 'subscribe'
+                     : canUpgradeSubscription(subscription)
+                     ? 'upgrade'

@@ -1,6 +1,6 @@
 {
   "comment": "Pinned upstream shape the Phase 1 seam tests were written against. CI re-runs the suite against this commit on schedule; any red suite means a patch hunk or hook target moved.",
-  "donorBaselineCommit": "b9109cfbaaaf19c31b5af4d315317fb67d8903c3",
+  "donorBaselineCommit": "f7d450a1d9aa068e33c0a0c9a3f9caaee3701f2f",
   "verifiedAtUpstreamCommit": "8301cdcaa4",
   "verifiedAt": "2026-10-11",
   "seams": {

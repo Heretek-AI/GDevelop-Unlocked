@@ -28,23 +28,7 @@
  
  type GetIconFunction = ({
    color: string,
-@@ -339,6 +342,7 @@
- type Props = {|
-   i18n: I18n,
-   onClose: (options: {| languageDidChange: boolean |}) => void,
-+  onOpenQuickCustomizationDialog: () => void,
-   /** The tab displayed when the dialog opens. Defaults to the preferences. */
-   initialTab?: PreferencesTabName,
-   /** The preferences section displayed when the dialog opens. Defaults to the general one. */
-@@ -378,6 +382,7 @@
- const PreferencesDialog = ({
-   i18n,
-   onClose,
-+  onOpenQuickCustomizationDialog,
-   initialTab,
-   initialSection,
-   isDesktop = !!electron,
-@@ -444,8 +449,26 @@
+@@ -444,8 +447,26 @@
      setDisableNpmScriptConfirmation,
      setUseBackgroundSerializerForSaving,
      setShowJsTypeError,
@@ -71,7 +55,7 @@
    const initialUse3DEditor = React.useRef<boolean>(values.use3DEditor);
  
    const isSearching = searchText.trim() !== '';
-@@ -554,7 +577,7 @@
+@@ -554,7 +575,7 @@
        if (sectionNameAtTop && sectionNameAtTop !== currentSection) {
          setCurrentSection((sectionNameAtTop: any));
        }
@@ -80,7 +64,7 @@
        const areaNameAtTop = getEntryKeyAtTop(
          shortcutAreas.map(area => area.name),
          getShortcutAreaElementId
-@@ -563,6 +586,7 @@
+@@ -563,6 +584,7 @@
          setCurrentShortcutArea((areaNameAtTop: any));
        }
      }
@@ -88,24 +72,7 @@
    };
  
    const hasCustomizedShortcuts = Object.keys(values.userShortcutMap).some(
-@@ -1237,6 +1261,16 @@
-                   setUseGDJSDevelopmentWatcher
-                 ),
-             },
-+            {
-+              id: 'quick-customization',
-+              label: i18n._(t`Quick customization`),
-+              renderControl: () => (
-+                <FlatButton
-+                  onClick={onOpenQuickCustomizationDialog}
-+                  label={<Trans>Open</Trans>}
-+                />
-+              ),
-+            },
-           ],
-         };
-       case 'contributor':
-@@ -1323,6 +1357,152 @@
+@@ -1323,6 +1345,152 @@
     * sections list on the left (not displayed on mobile) scrolls to a section.
     */
    const renderCurrentTabContent = () => {
@@ -258,7 +225,7 @@
      if (currentTab === 'shortcuts') {
        return (
          <ColumnStackLayout noMargin expand>
-@@ -1424,7 +1604,9 @@
+@@ -1424,7 +1592,9 @@
      setCurrentTab(tabName);
      // Start from the top of the new tab.
      if (tabName === 'preferences') setCurrentSection(visibleSections[0].name);
@@ -269,7 +236,7 @@
      pendingScrollElementIdRef.current = '';
    };
  
-@@ -1442,6 +1624,7 @@
+@@ -1442,6 +1612,7 @@
  
    // The entries of the sections list, on the left of the content: the
    // preferences sections or the shortcut areas, depending on the current tab.
@@ -277,7 +244,7 @@
    const sectionListEntries =
      currentTab === 'preferences'
        ? visibleSections.map(section => ({
-@@ -1451,13 +1634,15 @@
+@@ -1451,13 +1622,15 @@
            isActive: !isSearching && highlightedSectionName === section.name,
            onSelect: () => onSelectSection(section.name),
          }))
@@ -295,7 +262,7 @@
  
    return (
      <Dialog
-@@ -1512,6 +1697,7 @@
+@@ -1512,6 +1685,7 @@
              onChange={onSelectTab}
              options={[
                { value: 'preferences', label: <Trans>Preferences</Trans> },
@@ -303,7 +270,7 @@
                { value: 'shortcuts', label: <Trans>Keyboard Shortcuts</Trans> },
              ]}
            />
-@@ -1527,7 +1713,7 @@
+@@ -1527,7 +1701,7 @@
        }
      >
        <div style={styles.body}>
@@ -314,15 +281,7 @@
                <ColumnStackLayout noMargin>
 --- a/newIDE/app/src/MainFrame/Preferences/PreferencesContext.js
 +++ b/newIDE/app/src/MainFrame/Preferences/PreferencesContext.js
-@@ -218,7 +218,6 @@
-   hasProjectOpened: boolean,
-   userShortcutMap: ShortcutMap,
-   newObjectDialogDefaultTab: 'asset-store' | 'new-object',
--  newEffectDialogDefaultTab: 'asset-store' | 'from-scratch',
-   shareDialogDefaultTab: 'invite' | 'publish',
-   isMenuBarHiddenInPreview: boolean,
-   isAlwaysOnTopInPreview: boolean,
-@@ -259,6 +258,14 @@
+@@ -259,6 +259,14 @@
    disableNpmScriptConfirmation: boolean,
    showJsTypeError: boolean,
    canonicalEventSerialization: boolean,
@@ -337,16 +296,7 @@
  |};
  
  /**
-@@ -323,8 +330,6 @@
-   setShortcutForCommand: (commandName: CommandName, shortcut: string) => void,
-   getNewObjectDialogDefaultTab: () => 'asset-store' | 'new-object',
-   setNewObjectDialogDefaultTab: ('asset-store' | 'new-object') => void,
--  getNewEffectDialogDefaultTab: () => 'asset-store' | 'from-scratch',
--  setNewEffectDialogDefaultTab: ('asset-store' | 'from-scratch') => void,
-   getShareDialogDefaultTab: () => 'invite' | 'publish',
-   setShareDialogDefaultTab: ('invite' | 'publish') => void,
-   getIsMenuBarHiddenInPreview: () => boolean,
-@@ -394,6 +399,14 @@
+@@ -394,6 +402,14 @@
    setUseBackgroundSerializerForSaving: (enabled: boolean) => void,
    setShowJsTypeError: (enabled: boolean) => void,
    setCanonicalEventSerialization: (enabled: boolean) => void,
@@ -361,16 +311,7 @@
  |};
  
  export const initialPreferences = {
-@@ -428,8 +441,6 @@
-     newObjectDialogDefaultTab: ((electron
-       ? 'new-object'
-       : 'asset-store'): string),
--    // Show the effects of the store first, as they are not otherwise visible.
--    newEffectDialogDefaultTab: 'asset-store',
-     shareDialogDefaultTab: 'publish',
-     isMenuBarHiddenInPreview: true,
-     isAlwaysOnTopInPreview: false,
-@@ -465,6 +476,14 @@
+@@ -465,6 +481,14 @@
      disableNpmScriptConfirmation: false,
      showJsTypeError: false,
      canonicalEventSerialization: false,
@@ -385,16 +326,7 @@
    },
    setMultipleValues: () => {},
    setLanguage: () => {},
-@@ -507,8 +526,6 @@
-   setShortcutForCommand: (commandName: CommandName, shortcut: string) => {},
-   getNewObjectDialogDefaultTab: (): string => 'asset-store',
-   setNewObjectDialogDefaultTab: () => {},
--  getNewEffectDialogDefaultTab: (): string => 'asset-store',
--  setNewEffectDialogDefaultTab: () => {},
-   getShareDialogDefaultTab: (): string => 'invite',
-   setShareDialogDefaultTab: () => {},
-   getIsMenuBarHiddenInPreview: (): boolean => true,
-@@ -563,6 +580,14 @@
+@@ -563,6 +587,14 @@
    setUseBackgroundSerializerForSaving: (enabled: boolean) => {},
    setShowJsTypeError: (enabled: boolean) => {},
    setCanonicalEventSerialization: (enabled: boolean) => {},
@@ -466,30 +398,7 @@
    } catch (e) {
      return null;
    }
-@@ -118,7 +101,6 @@
-   lastLaunchedVersion: void,
-   newFeaturesAcknowledgements: {},
-   newObjectDialogDefaultTab: any,
--  newEffectDialogDefaultTab: string,
-   newProjectsDefaultFolder: any,
-   newProjectsDefaultStorageProviderName: string,
-   openDiagnosticReportAutomatically: boolean,
-@@ -277,14 +259,6 @@
-       this
-     ): any),
-     // $FlowFixMe[method-unbinding]
--    getNewEffectDialogDefaultTab: (this._getNewEffectDialogDefaultTab.bind(
--      this
--    ): any),
--    // $FlowFixMe[method-unbinding]
--    setNewEffectDialogDefaultTab: (this._setNewEffectDialogDefaultTab.bind(
--      this
--    ): any),
--    // $FlowFixMe[method-unbinding]
-     getShareDialogDefaultTab: (this._getShareDialogDefaultTab.bind(this): any),
-     // $FlowFixMe[method-unbinding]
-     setShareDialogDefaultTab: (this._setShareDialogDefaultTab.bind(this): any),
-@@ -436,9 +410,39 @@
+@@ -436,9 +419,39 @@
      setCanonicalEventSerialization: (this._setCanonicalEventSerialization.bind(
        this
      ): any),
@@ -529,7 +438,7 @@
      this._periodicUpdateCheckTimeout = setTimeout(
        () => this._checkUpdates(),
        CHECK_APP_UPDATES_TIMEOUT
-@@ -980,9 +984,11 @@
+@@ -980,9 +993,11 @@
  
    _persistValuesToLocalStorage(preferences: Preferences): any {
      try {
@@ -542,29 +451,7 @@
        );
      } catch (e) {
        console.warn('Unable to persist preferences', e);
-@@ -1160,21 +1166,6 @@
-     );
-   }
- 
--  _getNewEffectDialogDefaultTab(): any {
--    return this.state.values.newEffectDialogDefaultTab;
--  }
--
--  _setNewEffectDialogDefaultTab(
--    newEffectDialogDefaultTab: 'asset-store' | 'from-scratch'
--  ) {
--    this.setState(
--      state => ({
--        values: { ...state.values, newEffectDialogDefaultTab },
--      }),
--      () => this._persistValuesToLocalStorage(this.state)
--    );
--  }
--
-   _getShareDialogDefaultTab(): any {
-     return this.state.values.shareDialogDefaultTab;
-   }
-@@ -1508,6 +1499,125 @@
+@@ -1508,6 +1523,125 @@
      );
    }
  

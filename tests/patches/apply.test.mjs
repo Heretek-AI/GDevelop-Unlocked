@@ -28,6 +28,10 @@ const TIER1_FILES = [
   'newIDE/app/src/MainFrame/Preferences/PreferencesDialog.js',
   'newIDE/app/src/MainFrame/Preferences/PreferencesContext.js',
   'newIDE/app/src/MainFrame/Preferences/PreferencesProvider.js',
+  // Tier-2 remediation targets (09/10/11).
+  'newIDE/app/src/AiGeneration/PrepareAiUserContent.js',
+  'newIDE/app/src/AiGeneration/AiRequestChat/Utils.js',
+  'newIDE/app/src/AiGeneration/AskAiEditorContainer.js',
 ];
 
 describe('patcher: Tier-1 hunks apply to pristine upstream', () => {

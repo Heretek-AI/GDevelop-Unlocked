@@ -1,0 +1,264 @@
+--- a/newIDE/app/src/AiGeneration/AiRequestChat/Utils.js
++++ b/newIDE/app/src/AiGeneration/AiRequestChat/Utils.js
+@@ -1,4 +1,5 @@
+ // @flow
++import * as React from 'react';
+ import {
+   type AiRequestMessageAssistantFunctionCall,
+   type AiRequestAssistantMessage,
+@@ -82,6 +83,22 @@
+   | OrchestratorPlanRenderItem;
+ 
+ /**
++ * The user's GDevelop credit balance, or 0 when the limits response is absent
++ * or partial.
++ *
++ * `getUserLimits` validates only that the top-level `capabilities` key exists
++ * (`ensureObjectHasProperty`), so `credits.userBalance.amount` is unverified at
++ * runtime even though `Limits` declares it required — reading it behind only a
++ * top-level `limits ?` guard threw on every chat render for a partial response.
++ */
++export const getAvailableCredits = (limits: ?Limits): number => {
++  const credits = limits && limits.credits;
++  const userBalance = credits && credits.userBalance;
++  const amount = userBalance && userBalance.amount;
++  return typeof amount === 'number' ? amount : 0;
++};
++
++/**
+  * Whether the user can pay for one more AI request right now: either their AI
+  * usage allowance is not exhausted, or they chose to pay with GDevelop credits
+  * and have enough of them.
+@@ -111,3 +128,232 @@
+   if (!price) return true;
+   return availableCredits >= price.priceInCredits;
+ };
++
++/**
++ * Whether a send may proceed for this endpoint mode. Local/BYOK never depends
++ * on GDevelop credits or hosted quotas — the send button already
++ * short-circuits on `!isCustomEndpointEnabled() && !canPay`; create/continue
++ * paths must use the same rule so an exhausted hosted quota cannot silently
++ * drop a local request.
++ *
++ * Besides the endpoint toggle, a local session is identified by:
++ * - `aiRequestId` starting with `local-ai-` (chats that live only in the
++ *   local cache — still sendable after logout / endpoint toggle-off), or
++ * - `userId` starting with `local-` (the offline BYOK session id used when
++ *   there is no profile).
++ */
++export const canAffordAiRequest = ({
++  isCustomEndpointEnabled,
++  aiRequestId,
++  userId,
++  quota,
++  price,
++  availableCredits,
++  automaticallyUseCreditsForAiRequests,
++}: {|
++  isCustomEndpointEnabled: boolean,
++  aiRequestId?: ?string,
++  userId?: ?string,
++  quota: Quota | null,
++  price: UsagePrice | null,
++  availableCredits: number,
++  automaticallyUseCreditsForAiRequests: boolean,
++|}): boolean => {
++  if (isCustomEndpointEnabled) return true;
++  if (aiRequestId && aiRequestId.startsWith('local-ai-')) return true;
++  if (userId && userId.startsWith('local-')) return true;
++  return canPayForAiRequest({
++    quota,
++    price,
++    availableCredits,
++    automaticallyUseCreditsForAiRequests,
++  });
++};
++
++/**
++ * Whether the new-chat Stop control may cancel a create that has not produced
++ * an AiRequest yet.
++ *
++ * Allowed while the custom endpoint is on (Stop can arm `createAbortRequested`
++ * before the create registers), OR while a create is already in the pending
++ * registry — so flipping the endpoint off mid-hung-create does not remove the
++ * only way to abort an Ollama/VRAM first turn.
++ */
++export const canCancelPendingCreateAiRequest = ({
++  isCustomEndpointEnabled,
++  hasPendingCreate,
++  isSending,
++  hasAiRequest,
++}: {|
++  isCustomEndpointEnabled: boolean,
++  hasPendingCreate: boolean,
++  isSending: boolean,
++  hasAiRequest: boolean,
++|}): boolean =>
++  (isCustomEndpointEnabled || hasPendingCreate) && isSending && !hasAiRequest;
++
++/**
++ * Whether the send control should show a "Send again" label after a failed
++ * send (lastSendError set). Hidden while a request is working so Stop /
++ * send-in-progress icons stay unchanged.
++ */
++export const shouldShowSendAgainLabel = ({
++  hasSendError,
++  isWorking,
++}: {|
++  hasSendError: boolean,
++  isWorking: boolean,
++|}): boolean => hasSendError && !isWorking;
++
++/**
++ * Whether the model has produced anything yet in this request: an assistant
++ * message or a tool round-trip. Used to gate the cold-start hint to the first
++ * turn — later slow turns are context-size slowness, not a model loading into
++ * memory, and narrating every one as a cold start is noise.
++ */
++/**
++ * A short, human-readable note for the provider telemetry a routing proxy
++ * reported for the last turn (`x-omniroute-*`), or null when there is nothing
++ * to show. Kept pure so the chat's rendering stays a one-liner and the format
++ * is unit-testable.
++ */
++export const formatProviderTelemetryNote = (telemetry: ?Object): ?string => {
++  if (!telemetry || typeof telemetry !== 'object') return null;
++  const parts = [];
++  if (typeof telemetry.model === 'string' && telemetry.model) {
++    parts.push(telemetry.model);
++  }
++  if (
++    typeof telemetry.latencyMs === 'number' &&
++    Number.isFinite(telemetry.latencyMs)
++  ) {
++    parts.push(`${Math.round(telemetry.latencyMs)} ms`);
++  }
++  const hasIn = typeof telemetry.tokensIn === 'number';
++  const hasOut = typeof telemetry.tokensOut === 'number';
++  if (hasIn || hasOut) {
++    parts.push(
++      `~${hasIn ? telemetry.tokensIn : '?'} in / ${
++        hasOut ? telemetry.tokensOut : '?'
++      } out tokens`
++    );
++  }
++  if (typeof telemetry.cache === 'string' && telemetry.cache) {
++    parts.push(`cache ${telemetry.cache}`);
++  }
++  return parts.length > 0 ? parts.join(' · ') : null;
++};
++
++export const hasModelResponded = (output: ?Array<Object>): boolean =>
++  !!(output || []).some(
++    message =>
++      message &&
++      (message.role === 'assistant' || message.type === 'function_call_output')
++  );
++
++/**
++ * How long a local model may produce nothing before the chat explains why:
++ * a cold Ollama/LM Studio start (loading weights into VRAM, or swapping a
++ * model back in) is tens of seconds of silence on a stream that has not
++ * produced its first token. Below this the generic "Thinking..." rotation is
++ * the honest description; above it, silence is a fact the user should see
++ * rather than a hang they have to guess at.
++ */
++export const COLD_START_HINT_DELAY_MS = 15000;
++
++/**
++ * Whether to explain a silent local model start.
++ *
++ * Only meaningful for a request that runs on the user's own endpoint: the
++ * hosted API streams promptly, so a wait there means something else. `hasBytes`
++ * is true once the stream has produced any content, at which point the partial
++ * text itself is the progress indicator and a "still loading" hint would be
++ * wrong. The elapsed time is measured from when the turn started, not from the
++ * last chunk — this describes the *first* token, which is the one a cold local
++ * model withholds.
++ */
++export const shouldShowLocalColdStartHint = ({
++  isLocalRequest,
++  hasBytes,
++  elapsedMs,
++}: {|
++  isLocalRequest: boolean,
++  hasBytes: boolean,
++  elapsedMs: number,
++|}): boolean =>
++  isLocalRequest && !hasBytes && elapsedMs >= COLD_START_HINT_DELAY_MS;
++
++/**
++ * Drives shouldShowLocalColdStartHint on a timer.
++ *
++ * Kept out of the component so the timing contract is testable without
++ * rendering the chat (whose CSS-module imports need the app's webpack loader).
++ * `readHasBytes` is a function, not a value: the partial content lives in the
++ * client's per-request registry, which is polled rather than subscribed to, so
++ * the hook must keep reading it while it runs.
++ *
++ * Re-checks on a one-second interval instead of a one-shot timer: the wait that
++ * matters is "how long since the first token should have arrived", so the hook
++ * has to notice the tokens *arriving* and clear itself, not just fire once.
++ *
++ * `progressKey` re-arms the wait whenever the transcript advances (a new
++ * assistant message, tool call, or tool output proves the model is responding,
++ * so the "first token" wait starts over). Without this, a multi-turn agent run
++ * — or any non-streaming turn, where partial bytes are never recorded — keeps
++ * the hint up for the whole run, long after the model has answered.
++ */
++export const useLocalColdStartHint = ({
++  isLocalRequest,
++  readHasBytes,
++  progressKey,
++  hasResponded,
++}: {|
++  isLocalRequest: boolean,
++  readHasBytes: () => boolean,
++  progressKey?: number,
++  /**
++   * True once the model has produced anything in this request. The hint
++   * describes a cold start (first turn); later slow turns are context-size
++   * slowness, narrated by the thinking phrases instead.
++   */
++  hasResponded?: boolean,
++|}): boolean => {
++  const [showHint, setShowHint] = React.useState(false);
++  // Callers pass `readHasBytes` inline (`() => !!customGet...`), so its identity
++  // changes on every parent render — and the chat re-renders on the 8s
++  // thinking-phrase rotation. Depending on it directly would restart the
++  // measured interval each time and the wait would never reach the threshold.
++  // Hold the latest function in a ref instead: the timer measures from when the
++  // turn started, while still calling the current reader.
++  const readHasBytesRef = React.useRef(readHasBytes);
++  readHasBytesRef.current = readHasBytes;
++  React.useEffect(
++    () => {
++      if (!isLocalRequest || hasResponded) {
++        setShowHint(false);
++        return undefined;
++      }
++      // A new effect run means a new turn segment: either the request became
++      // local or the transcript advanced. Measure from here and start hidden.
++      setShowHint(false);
++      const startedAt = Date.now();
++      const interval = setInterval(() => {
++        setShowHint(
++          shouldShowLocalColdStartHint({
++            isLocalRequest,
++            hasBytes: readHasBytesRef.current(),
++            elapsedMs: Date.now() - startedAt,
++          })
++        );
++      }, 1000);
++      return () => clearInterval(interval);
++    },
++    // `readHasBytes` is deliberately not a dependency: it is read through the
++    // ref so a new identity does not reset the elapsed measurement. Only a
++    // real transcript advance (`progressKey`) or the model responding at all
++    // (`hasResponded`) re-arms or retires the wait.
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++    [isLocalRequest, progressKey, hasResponded]
++  );
++  return showHint;
++};
