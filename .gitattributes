@@ -1,0 +1,4 @@
+# Patches, launcher files and the hash-pinned Tier-2 runtime must stay
+# byte-exact on every platform: a CRLF checkout breaks every hunk and
+# every sha256 pin. No end-of-line conversion, anywhere.
+* -text

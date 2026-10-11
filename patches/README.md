@@ -1,8 +1,10 @@
 # patches/ — Tier-1 entitlement unlocks (Phase 2, issue #2)
 
-Stock upstream `app.asar` + these hunks = fork parity for Tier-1, with no
-205-file merge treadmill. Applied by `scripts/apply-patches.mjs`
-(extract -> patch -> repack); every hunk is gated by the Phase 1 seam suite.
+Stock upstream **source** + these hunks = fork parity for Tier-1, with no
+205-file merge treadmill. Applied by `scripts/apply-patches.mjs --target
+<checkout>` before building; every hunk is gated by the Phase 1 seam
+suite. They cannot apply to a release `app.asar` (bundled renderer) —
+that path is launcher-only, see `launcher/README.md`.
 
 ## Files
 
@@ -14,7 +16,7 @@ Stock upstream `app.asar` + these hunks = fork parity for Tier-1, with no
 | `04-loading-screen.patch` | `ProjectManager/LoadingScreenEditor.js` | Logo guard + watermark guard/clamp deleted |
 | `05-preview-debugger.patch` | `.../LocalPreviewLauncher/index.js`, `.../DebuggerEditorContainer.js` | `% 16` block deleted; network-preview + debugger stubs |
 | `06-electron-hook.patch` | `electron-app/app/main.js` (loader line only) + `launcher/*.cjs` sync by the driver | Main-process hook install before the `BrowserWindow` destructure |
-| `07-generation-glue.patch` | `Utils/GDevelopServices/Generation.js` (**curated forward-port**, see `REBASE.md`) | Tier-2 branch points: `local-ai-*` / `isCustomEndpointEnabled()` routing into the extracted client; upstream-new attachment API (`AiRequestAttachment`, `createAiAttachmentUploads/Downloads`) preserved |
+| `07-generation-glue.patch` | `Utils/GDevelopServices/Generation.js` (**curated forward-port**, see `REBASE.md`) | Tier-2 branch points: `local-ai-*` / `isCustomEndpointEnabled()` routing into the extracted client; upstream-new attachment API (`AiRequestAttachment`, `createAiAttachmentUploads/Downloads`) preserved, with a BYOK guard added here (uploads refused, never sent to hosted storage) |
 | `08-preferences-ai.patch` | `Preferences{Dialog,Context,Provider}.js` (**curated forward-port**, see `REBASE.md`) + fork-only `PreferencesStorage.js` (new file) | `ai` preferences tab + persistable-preferences leaf (API key never persisted); upstream-new `newEffectDialogDefaultTab` preserved |
 | `09-prepare-ai-content.patch` | `AiGeneration/PrepareAiUserContent.js` (verbatim fork delta, audit remediation) | BYOK early return: custom-endpoint or `local-` sessions inline project JSON, never touch S3 presigned upload (fixes cloud leak + 401 crash). Purely additive — no upstream revert |
 | `10-ai-chat-affordance.patch` | `AiGeneration/AiRequestChat/Utils.js` (verbatim fork delta, audit remediation) | Adds `getAvailableCredits` (partial-limits crash fix) + `canAffordAiRequest` (0-credit BYOK sends). Purely additive — no upstream revert |

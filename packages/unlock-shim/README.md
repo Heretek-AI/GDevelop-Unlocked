@@ -1,20 +1,48 @@
-# packages/unlock-shim — injected seams (Tier-1 + Tier-2 support)
+# packages/unlock-shim — routing invariants (reference implementation)
 
-Thin, tested modules that sit between stock upstream code and the
-unlocked runtime. Everything here is framework-free and covered by
-`tests/` — no React, no Electron, no GDevelop core imports.
+Thin, tested modules that state the invariants the unlocked runtime
+relies on. Everything here is framework-free and covered by `tests/` —
+no React, no Electron, no GDevelop core imports.
 
 | Module | Role | Tests |
 |---|---|---|
-| `generation-shim.mjs` | Tier-2 routing: `local-ai-*` → custom client, hosted → hosted API, fail-closed leak guard (`assertNoLocalIdsLeak`, `guardHostedCall`) | `tests/tier2/shim.test.mjs` |
+| `generation-shim.mjs` | Tier-2 routing: `local-ai-*` → custom client, hosted → hosted API, fail-closed leak guard (`assertNoLocalIdsLeak`, `guardHostedCall`) | `tests/tier2/shim.test.mjs`, `tests/integration/ai-byok-flow.test.mjs` |
 
-## Wiring contract (what the glue patches connect)
+## Duplication contract (what actually ships)
 
-- Patch 07 calls `selectBackend({aiRequestId(s), customConfig})` at each
-  Generation.js branch point; every hosted call site is wrapped with
-  `guardHostedCall(fn, endpoint, pickIds)` so a `local-ai-*` id can
-  never leak to `api.gdevelop.io/generation`, even if a branch is missed.
-- `isCustomEndpointEnabled(config)` is pure: the caller supplies the
-  endpoint config (read via `CustomAIClient.getCustomEndpointConfig`,
-  backed by `gd-custom-ai-config`). No localStorage access in this module
-  keeps it runnable in Node tests.
+**The shipped renderer does not import this package.** Patch 07 inlines
+the same predicates into `Generation.js` instead of calling them, so the
+patch stays a self-contained forward-port of the fork delta and the
+webpack build needs no extra module. The two copies are kept in step by
+`tests/integration/shim-wiring-contract.test.mjs`, which applies the real
+patch 07 to a pristine fixture copy and checks every hosted call site:
+
+| Shim function | Inlined in patch 07 as | Where |
+|---|---|---|
+| `isLocalAiRequestId(id)` | `aiRequestId.startsWith('local-ai-')` short-circuit before the hosted request | every function whose hosted URL carries the id (`getAiRequest`, `addMessageToAiRequest`, `retry`/`suspend`/`update`/`delete`/`fork`, feedback, suggestions, message update) |
+| `partitionAiRequestIds(ids)` | `localIds` / `hostedIds` filters; only `hostedIds` are sent | `getAiRequestStatuses` |
+| `selectBackend({customConfig})` | `isCustomEndpointEnabled() \|\| userId.startsWith('local-')` early return (a throw for attachment uploads) | `createAiRequest`, `createAiGeneratedEvent`, asset/resource search, presigned URLs, attachment uploads, `fetchAiSettings` |
+| `guardHostedCall` / `assertNoLocalIdsLeak` | **not inlined** — there is no fail-closed wrapper in the shipped code; the short-circuits above are the only barrier | — |
+
+Consequences to keep in mind:
+
+- The fail-closed guard is a property of this reference module, not of
+  the product. In the product a missed branch leaks instead of throwing;
+  the contract test is the compensating control (an unclassified hosted
+  call site fails the suite).
+- The contract test is source-order proof, not execution (its header
+  states the limit). Live zero-egress proof is issue #12.
+- Attachments (upstream-new, no fork precedent): `createAiAttachmentUploads`
+  throws in BYOK mode before any hosted call — an upload goes to
+  GDevelop's storage, which a custom endpoint cannot read back.
+  `createAiAttachmentDownloads` returns not-found for the offline BYOK
+  user; attachments of a hosted chat are hosted data and are still read
+  from the hosted API. These two guards are this repo's own addition to
+  patch 07, not part of the fork delta.
+- `isCustomEndpointEnabled(config)` here is pure (caller supplies the
+  config); the shipped one in `CustomAIClient` reads `gd-custom-ai-config`
+  from localStorage itself.
+
+When rebasing patch 07 (`patches/REBASE.md`): a new upstream hosted
+function turns the contract test red until it is added to `CALL_SITES`
+with a deliberate BYOK decision.

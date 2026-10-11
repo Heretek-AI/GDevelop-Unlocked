@@ -20,7 +20,9 @@ function makeLogger() {
   };
 }
 
-function makeFakeElectron() {
+// `configurable: false` reproduces production Electron exactly (the wrap
+// cannot succeed there); the default `true` models the wrappable case.
+function makeFakeElectron({ configurable = true } = {}) {
   const listeners = {};
   const webRequests = [];
   class FakeWindow {
@@ -42,7 +44,7 @@ function makeFakeElectron() {
     },
   };
   Object.defineProperty(exportsObj, 'BrowserWindow', {
-    configurable: true,
+    configurable,
     enumerable: true,
     get: () => FakeWindow,
   });
@@ -119,6 +121,42 @@ describe('hook: real-Electron regressions', () => {
         'preload-unlock.cjs'
       )
     );
+  });
+
+  it('non-configurable export: wrap fails, fallbacks still deliver the unlock', async () => {
+    // Audit G4: the other fakes are configurable:true, so they never
+    // reach the wrap-fail branch that production Electron always takes.
+    const { electron, listeners, webRequests, FakeWindow } = makeFakeElectron({
+      configurable: false,
+    });
+    const { logger, records } = makeLogger();
+    const result = hook.installPreloadHook(electron, {
+      logger,
+      skipUpdaterWatch: true,
+    });
+    assert.equal(result.wrapped, false);
+    assert.equal(electron.BrowserWindow, FakeWindow, 'export left untouched');
+    assert.ok(records.warn.some(msg => msg.includes('not wrappable')));
+    // Degraded, not dropped: both fallbacks are armed...
+    assert.equal(result.windowsWatched, true);
+    assert.equal(result.requestWatched, true);
+    assert.equal(webRequests.length, 1);
+    // ...and an unwrapped window (no preload) is seeded after load.
+    const win = new electron.BrowserWindow({});
+    assert.equal(win.options.webPreferences, undefined, 'no preload injected');
+    const executed = [];
+    const webContents = {
+      once: (event, cb) => (webContents._loaded = cb),
+      executeJavaScript: source => {
+        executed.push(source);
+        return Promise.resolve(executed.length > 1);
+      },
+    };
+    listeners['browser-window-created']({}, { webContents });
+    webContents._loaded();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(executed.length, 2);
+    assert.ok(executed[1].includes('__HERETEK__'));
   });
 
   it('defers webRequest setup until app ready (prod failure)', async () => {
@@ -251,6 +289,9 @@ describe('hook: updater pin', () => {
     handlers['update-downloaded']();
     assert.equal(globalThis.__HERETEK__.updatePending, true);
     assert.equal(records.warn.length, 1);
-    assert.ok(records.warn[0].includes('apply-patches.mjs --asar'));
+    // The remedy must be the path that works on a release asar (bundled
+    // renderer): launcher injection, never source patches (audit D1).
+    assert.ok(records.warn[0].includes('inject-launcher.mjs --appdir'));
+    assert.ok(!records.warn[0].includes('apply-patches.mjs --asar'));
   });
 });

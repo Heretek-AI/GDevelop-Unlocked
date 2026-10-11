@@ -504,7 +504,38 @@
      endpointName:
        '/ai-user-content/action/create-presigned-urls of Generation API',
    });
-@@ -1258,6 +1461,10 @@
+@@ -1176,6 +1379,15 @@
+     |}>,
+   |}
+ ): Promise<Array<AiAttachmentUpload>> => {
++  // An attachment is uploaded to GDevelop's storage, which a custom endpoint
++  // cannot read back: in BYOK mode it would only leak the file. Refuse before
++  // any hosted call (same rule as createAiUserContentPresignedUrls above).
++  if (isCustomEndpointEnabled() || (userId && userId.startsWith('local-'))) {
++    throw new Error(
++      'Attachments are not available while a custom AI endpoint is enabled ' +
++        '(they would be uploaded to GDevelop servers).'
++    );
++  }
+   const authorizationHeader = await getAuthorizationHeader();
+   const response = await apiClient.post(
+     `/ai-user-content/action/create-attachment-uploads`,
+@@ -1214,6 +1426,14 @@
+     attachmentIds: Array<string>,
+   |}
+ ): Promise<Array<AiAttachmentDownload>> => {
++  // The offline BYOK user has no hosted attachments: never ask for them.
++  // (Attachments of a hosted chat are hosted data and are still read there.)
++  if (userId && userId.startsWith('local-')) {
++    return attachmentIds.map(attachmentId => ({
++      attachmentId,
++      error: 'not-found',
++    }));
++  }
+   const authorizationHeader = await getAuthorizationHeader();
+   const response = await apiClient.post(
+     `/ai-user-content/action/create-attachment-downloads`,
+@@ -1258,6 +1478,10 @@
      upToMessageId?: string,
    |}
  ): Promise<AiRequest> => {
@@ -515,7 +546,7 @@
    const authorizationHeader = await getAuthorizationHeader();
    const response = await apiClient.post(
      `/ai-request/${aiRequestId}/action/fork`,
-@@ -1285,13 +1492,25 @@
+@@ -1285,13 +1509,25 @@
  }: {|
    environment: Environment,
  |}): Promise<AiSettings> => {

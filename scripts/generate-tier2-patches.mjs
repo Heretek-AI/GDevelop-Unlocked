@@ -14,6 +14,7 @@
 // before it is written. Regeneration is deterministic: committed output
 // must equal fresh output (pinned by tests/tier2/tier2-patches.test.mjs).
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -41,14 +42,25 @@ const PATCHES = [
 function parseArgs(argv) {
   const out = {
     upstream: path.join(ROOT, 'review', 'GDevelop'),
-    fork: path.join(ROOT, 'review', 'GDevelop-Heretek'),
+    // No default: this repo holds no donor checkout and must never grow
+    // an implicit path to one (fork-independence, RETIREMENT.md).
+    fork: null,
     out: path.join(ROOT, 'patches'),
   };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--upstream') out.upstream = path.resolve(argv[++i]);
     else if (argv[i] === '--fork') out.fork = path.resolve(argv[++i]);
     else if (argv[i] === '--out') out.out = path.resolve(argv[++i]);
+    else
+      throw new Error(
+        `Unknown argument: ${argv[i]} (expected --upstream, --fork or --out <dir>)`
+      );
   }
+  if (!out.fork)
+    throw new Error(
+      '--fork <donor-checkout> is required: there is no default donor ' +
+        'path. Nothing in this repo needs one except this on-demand tool.'
+    );
   return out;
 }
 
@@ -68,9 +80,12 @@ function diffFile(upstreamAbs, forkAbs, rel, isNew) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const scratchBase =
-  process.env.TMPDIR || process.env.TMP || process.env.TEMP || '/tmp/opencode';
-fs.mkdirSync(scratchBase, { recursive: true });
+// Private scratch dir: os.tmpdir() honors TMPDIR/TMP/TEMP, and mkdtemp
+// makes it unpredictable + owner-only (no shared-tmp filename races).
+const scratchBase = fs.mkdtempSync(path.join(os.tmpdir(), 'gen-tier2-'));
+process.on('exit', () =>
+  fs.rmSync(scratchBase, { recursive: true, force: true })
+);
 fs.mkdirSync(args.out, { recursive: true });
 
 for (const patch of PATCHES) {

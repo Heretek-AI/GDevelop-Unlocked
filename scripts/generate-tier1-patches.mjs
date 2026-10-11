@@ -9,6 +9,7 @@
 // `type` import tweak) — verify with: diff the patched tree against the
 // fork and confirm only those exclusions remain.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -436,6 +437,12 @@ const path = require('path');`,
 const args = parseArgs(process.argv.slice(2));
 const outDir = args.out;
 fs.mkdirSync(outDir, { recursive: true });
+// Private scratch dir: os.tmpdir() honors TMPDIR/TMP/TEMP, and mkdtemp
+// makes it unpredictable + owner-only (no shared-tmp filename races).
+const scratchBase = fs.mkdtempSync(path.join(os.tmpdir(), 'gen-tier1-'));
+process.on('exit', () =>
+  fs.rmSync(scratchBase, { recursive: true, force: true })
+);
 
 for (const patch of PATCHES) {
   let combined = '';
@@ -447,11 +454,8 @@ for (const patch of PATCHES) {
     const patchedText = patch.transform(upstreamText, rel);
     if (patchedText === upstreamText)
       throw new Error(`Patch ${patch.name} changed nothing in ${rel}.`);
-    const scratchBase =
-      process.env.TMPDIR || process.env.TMP || process.env.TEMP || '/tmp/opencode';
     const tmpOld = path.join(scratchBase, `gen-old-${Date.now()}.txt`);
     const tmpNew = path.join(scratchBase, `gen-new-${Date.now()}.txt`);
-    fs.mkdirSync(scratchBase, { recursive: true });
     fs.writeFileSync(tmpOld, upstreamText);
     fs.writeFileSync(tmpNew, patchedText);
     const r = spawnSync(

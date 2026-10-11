@@ -17,7 +17,10 @@
 //     (fetch/XHR spoof + __HERETEK__ seed) before React hydrates.
 //   - Network backstop: session.defaultSession.webRequest.onBeforeRequest
 //     redirects GET usage/{limits,subscription-v2} to data: URLs.
-//     Firebase auth/JWT untouched.
+//     Firebase auth/JWT untouched. NOTE: measured on Electron 32 /
+//     Chromium 128, the https -> data: redirect is refused for XHR/fetch
+//     (net::ERR_UNSAFE_REDIRECT), so this layer fails the request rather
+//     than serving it — see launcher/README.md ("Known limits").
 // Testability: `electron` is injectable; tests/launcher/hook.test.cjs
 // drives the whole module with fakes (no Electron needed).
 'use strict';
@@ -42,9 +45,9 @@ const SPOOFED_USAGE_URLS = [
 const UPDATER_PIN_MESSAGE =
   '[heretek] update downloaded: the Tier-1 hook (main.js loader line + ' +
   'launcher/*.cjs) is replaced by the updater payload on restart. ' +
-  'Re-run node scripts/apply-patches.mjs --asar <new-app.asar> --out ' +
-  '<patched.asar> before launching, or Tier-1 gates return. ' +
-  'See launcher/README.md ("auto-updater pin").';
+  'Re-inject before launching (extract the new app.asar, run node ' +
+  'scripts/inject-launcher.mjs --appdir <extracted-asar>, repack), or ' +
+  'Tier-1 gates return. See launcher/README.md ("auto-updater pin").';
 
 /**
  * Merge the unlock preload into window options. An explicitly set
@@ -351,6 +354,24 @@ const SMOKE_PROBE_SOURCE = `(async function() {
     try { var j3 = await r3.clone().json(); spoofed = !!(j3 && j3.capabilities); } catch (e2) {}
     out.passthrough = { resolved: true, spoofed: spoofed, status: r3.status };
   } catch (e) { out.passthrough = { resolved: false, spoofed: false, error: String(e).slice(0, 120) }; }
+  // The app's own client is axios 0.18 over XHR, not fetch: settle exactly
+  // as that adapter does (readyState 4, non-zero status) so a spoof that
+  // only works for fetch cannot pass.
+  try {
+    out.xhr = await new Promise(function(resolve) {
+      var x = new XMLHttpRequest();
+      x.open('GET', 'https://api.gdevelop.io/usage/limits?userId=smoke', true);
+      x.onreadystatechange = function() {
+        if (x.readyState !== 4 || x.status === 0) return;
+        var j = null;
+        try { j = JSON.parse(x.responseText); } catch (e2) {}
+        resolve({ status: x.status, maxCloudProjects: j && j.capabilities && j.capabilities.cloudProjects && j.capabilities.cloudProjects.maximumCount });
+      };
+      x.onerror = function() { resolve({ status: 0, error: 'network error' }); };
+      x.send();
+      setTimeout(function() { resolve({ status: 0, error: 'never settled' }); }, 5000);
+    });
+  } catch (e) { out.errors.push('xhr:' + e.message); }
   return out;
 })()`;
 
@@ -379,6 +400,16 @@ function verdictSmokeResults(out) {
     failures.push('subscription not unlocked');
   if (!out || !out.passthrough || out.passthrough.spoofed !== false)
     failures.push('POST was spoofed (over-interception)');
+  if (
+    !out ||
+    !out.xhr ||
+    out.xhr.status !== 200 ||
+    out.xhr.maxCloudProjects !== 999
+  )
+    failures.push(
+      'XHR limits not unlocked (app client path)' +
+        (out && out.xhr && out.xhr.error ? ': ' + out.xhr.error : '')
+    );
   return { ok: failures.length === 0, failures };
 }
 
@@ -450,15 +481,21 @@ function armSmokeMode(electronModule, opts) {
     app && typeof app.whenReady === 'function'
       ? app.whenReady()
       : Promise.resolve();
-  Promise.resolve(ready).then(() => {
-    const existing =
-      typeof options.existingWindows === 'function'
-        ? options.existingWindows()
-        : [];
-    existing.forEach(win => {
-      if (win && win.webContents) runProbe(win.webContents);
+  Promise.resolve(ready)
+    .then(() => {
+      const existing =
+        typeof options.existingWindows === 'function'
+          ? options.existingWindows()
+          : [];
+      existing.forEach(win => {
+        if (win && win.webContents) runProbe(win.webContents);
+      });
+    })
+    .catch(error => {
+      // Not fatal: windows created later still reach runProbe through
+      // browser-window-created; the timeout verdict covers "none ever".
+      logger.error('[heretek] smoke existing-window scan failed:', error);
     });
-  });
   logger.info('[heretek] smoke mode armed (--heretek-smoke).');
   return { armed: true };
 }

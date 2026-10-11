@@ -60,6 +60,72 @@ function makeXhrClass() {
   };
 }
 
+// The two real-XMLHttpRequest facts the plain fake above hides (both
+// observed on a real build, Electron 32 / Chromium 128, issue #12):
+//   1. readyState/status/responseText/response are getter-only prototype
+//      accessors — assignment throws in strict code and silently no-ops
+//      in sloppy code;
+//   2. it is an EventTarget — consumers may use on* attributes OR
+//      addEventListener, and axios >= 0.22 settles on `loadend`.
+function makeRealisticXhrClass() {
+  class RealisticXHR extends EventTarget {
+    constructor() {
+      super();
+      this._state = { readyState: 0, status: 0, responseText: '', response: '' };
+      this.sent = [];
+    }
+    open(method, url) {
+      this._state.readyState = 1;
+      this.url = url;
+    }
+    send() {
+      this.sent.push(this.url);
+    }
+    dispatchEvent(event) {
+      const handler = this['on' + event.type];
+      if (typeof handler === 'function') handler.call(this, event);
+      return super.dispatchEvent(event);
+    }
+  }
+  for (const name of ['readyState', 'status', 'responseText', 'response'])
+    Object.defineProperty(RealisticXHR.prototype, name, {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return this._state[name];
+      },
+    });
+  return RealisticXHR;
+}
+
+// axios 0.18.1 xhr adapter (what upstream newIDE ships): settles only
+// from onreadystatechange, and only at readyState 4 with a non-zero status.
+function axios018StyleGet(XHR, url) {
+  return new Promise((resolve, reject) => {
+    const request = new XHR();
+    request.open('GET', url);
+    request.onreadystatechange = () => {
+      if (request.readyState !== 4) return;
+      if (request.status === 0) return;
+      resolve({ status: request.status, data: JSON.parse(request.responseText) });
+    };
+    request.send();
+    setTimeout(() => reject(new Error('spoofed XHR never settled')), 200);
+  });
+}
+
+function loadendListenerGet(XHR, url) {
+  return new Promise((resolve, reject) => {
+    const request = new XHR();
+    request.open('GET', url);
+    request.addEventListener('loadend', () =>
+      resolve({ status: request.status, data: JSON.parse(request.responseText) })
+    );
+    request.send();
+    setTimeout(() => reject(new Error('loadend never fired')), 200);
+  });
+}
+
 describe('preload: fetch wrapper', () => {
   it('spoofs limits + subscription GETs, logs them, passes the rest through', async () => {
     const { scope, calls } = makeScope();
@@ -108,6 +174,58 @@ describe('preload: XHR patch', () => {
     other.send();
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.deepEqual(other.sent, [LIMITS]);
+  });
+});
+
+describe('preload: XHR spoof against real-XMLHttpRequest semantics', () => {
+  it('strict module path: axios 0.18 consumer and loadend listener both settle', async () => {
+    const { scope } = makeScope();
+    const XHR = preload.patchXhr(makeRealisticXhrClass(), scope);
+    const viaAxios = await axios018StyleGet(XHR, LIMITS);
+    assert.equal(viaAxios.status, 200);
+    assert.equal(viaAxios.data.capabilities.cloudProjects.maximumCount, 999);
+    const viaLoadend = await loadendListenerGet(XHR, SUB);
+    assert.equal(viaLoadend.data.planId, 'gdevelop_startup');
+  });
+
+  it('a reused XHR does not keep the spoofed state on its next request', async () => {
+    // open() re-initializes an XHR. The per-instance shadows from a spoofed
+    // response must go, or a later real request reads back the old 200.
+    const { scope } = makeScope();
+    const XHR = preload.patchXhr(makeRealisticXhrClass(), scope);
+    const xhr = new XHR();
+    await new Promise(resolve => {
+      xhr.onloadend = resolve;
+      xhr.open('GET', LIMITS);
+      xhr.send();
+    });
+    assert.equal(xhr.readyState, 4);
+    assert.equal(xhr.status, 200);
+
+    xhr.open('POST', LIMITS); // not spoofed: goes to the real send
+    assert.equal(xhr.readyState, 1, 'stale spoofed readyState after open()');
+    assert.equal(xhr.status, 0, 'stale spoofed status after open()');
+    assert.equal(xhr.responseText, '', 'stale spoofed body after open()');
+    xhr.send();
+    assert.deepEqual(xhr.sent, [LIMITS]);
+  });
+
+  it('injected fallback source (the production path) settles the same consumers', async () => {
+    // The hook injects this string with executeJavaScript whenever the
+    // BrowserWindow export is not wrappable — i.e. always, in production.
+    const { scope } = makeScope();
+    scope.XMLHttpRequest = makeRealisticXhrClass();
+    const sandbox = { window: scope, URL, Promise, JSON, Object, setTimeout, Event };
+    vm.createContext(sandbox);
+    vm.runInContext(preload.getRendererFallbackSource(), sandbox);
+    const XHR = sandbox.window.XMLHttpRequest;
+    const viaAxios = await axios018StyleGet(XHR, LIMITS);
+    assert.equal(viaAxios.status, 200);
+    assert.equal(viaAxios.data.capabilities.cloudProjects.maximumCount, 999);
+    const viaLoadend = await loadendListenerGet(XHR, SUB);
+    assert.equal(viaLoadend.data.planId, 'gdevelop_startup');
+    // Array.from: the log array belongs to the vm realm.
+    assert.deepEqual(Array.from(scope.__HERETEK__.spoofedRequests), [LIMITS, SUB]);
   });
 });
 

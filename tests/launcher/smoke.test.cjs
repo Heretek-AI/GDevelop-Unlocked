@@ -21,6 +21,7 @@ const GOOD_RESULTS = {
   limits: { status: 200, maxCloudProjects: 999 },
   subscription: { status: 200, planId: 'gdevelop_startup' },
   passthrough: { resolved: false, spoofed: false, error: 'fetch failed' },
+  xhr: { status: 200, maxCloudProjects: 999 },
   errors: [],
 };
 
@@ -85,6 +86,21 @@ describe('smoke: verdict', () => {
       false
     );
     assert.equal(hook.verdictSmokeResults(null).ok, false);
+  });
+
+  it('fails when only fetch is unlocked (the app client rides XHR)', () => {
+    // The shape seen live before the XHR delivery fix: fetch probes green,
+    // the axios-style XHR never reaches readyState 4.
+    const hung = hook.verdictSmokeResults({
+      ...GOOD_RESULTS,
+      xhr: { status: 0, error: 'never settled' },
+    });
+    assert.equal(hung.ok, false);
+    assert.deepEqual(hung.failures, [
+      'XHR limits not unlocked (app client path): never settled',
+    ]);
+    const { xhr, ...fetchOnly } = GOOD_RESULTS;
+    assert.equal(hook.verdictSmokeResults(fetchOnly).ok, false);
   });
 
   it('flag parsing ignores position after the binary', () => {
@@ -161,6 +177,31 @@ describe('smoke: arm sequence', () => {
     assert.ok(
       records.info.some(l => l.includes('timeout waiting for first window'))
     );
+  });
+
+  it('a failing existing-window scan is logged, and later windows still probe', async () => {
+    const { electron, fireWindowCreated, fireLoad } =
+      makeFakeElectron(GOOD_RESULTS);
+    const { logger, records } = makeLogger();
+    let exitCode = null;
+    hook.armSmokeMode(electron, {
+      argv: ['node', 'app', '--heretek-smoke'],
+      logger,
+      exitFn: code => (exitCode = code),
+      timeoutMs: 1000,
+      existingWindows: () => {
+        throw new Error('getAllWindows unavailable');
+      },
+    });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(exitCode, null, 'scan failure must not decide the verdict');
+    assert.ok(
+      records.error.some(l => l.includes('existing-window scan failed'))
+    );
+    fireWindowCreated();
+    fireLoad();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(exitCode, 0);
   });
 
   it('does nothing without the flag', () => {
