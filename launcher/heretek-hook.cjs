@@ -354,6 +354,24 @@ const SMOKE_PROBE_SOURCE = `(async function() {
     try { var j3 = await r3.clone().json(); spoofed = !!(j3 && j3.capabilities); } catch (e2) {}
     out.passthrough = { resolved: true, spoofed: spoofed, status: r3.status };
   } catch (e) { out.passthrough = { resolved: false, spoofed: false, error: String(e).slice(0, 120) }; }
+  // The app's own client is axios 0.18 over XHR, not fetch: settle exactly
+  // as that adapter does (readyState 4, non-zero status) so a spoof that
+  // only works for fetch cannot pass.
+  try {
+    out.xhr = await new Promise(function(resolve) {
+      var x = new XMLHttpRequest();
+      x.open('GET', 'https://api.gdevelop.io/usage/limits?userId=smoke', true);
+      x.onreadystatechange = function() {
+        if (x.readyState !== 4 || x.status === 0) return;
+        var j = null;
+        try { j = JSON.parse(x.responseText); } catch (e2) {}
+        resolve({ status: x.status, maxCloudProjects: j && j.capabilities && j.capabilities.cloudProjects && j.capabilities.cloudProjects.maximumCount });
+      };
+      x.onerror = function() { resolve({ status: 0, error: 'network error' }); };
+      x.send();
+      setTimeout(function() { resolve({ status: 0, error: 'never settled' }); }, 5000);
+    });
+  } catch (e) { out.errors.push('xhr:' + e.message); }
   return out;
 })()`;
 
@@ -382,6 +400,16 @@ function verdictSmokeResults(out) {
     failures.push('subscription not unlocked');
   if (!out || !out.passthrough || out.passthrough.spoofed !== false)
     failures.push('POST was spoofed (over-interception)');
+  if (
+    !out ||
+    !out.xhr ||
+    out.xhr.status !== 200 ||
+    out.xhr.maxCloudProjects !== 999
+  )
+    failures.push(
+      'XHR limits not unlocked (app client path)' +
+        (out && out.xhr && out.xhr.error ? ': ' + out.xhr.error : '')
+    );
   return { ok: failures.length === 0, failures };
 }
 

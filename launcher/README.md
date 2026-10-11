@@ -17,15 +17,16 @@ three layers:
   a usage GET that reaches this layer *fails* instead of returning the
   unlocked body. Only requests issued before the window fallback has
   installed its wrappers (or from another realm, e.g. an iframe) reach
-  it. The `--heretek-smoke` verdict proves the renderer `fetch` wrapper,
-  not this layer.
+  it. The `--heretek-smoke` verdict proves the renderer `fetch` and XHR
+  wrappers, not this layer.
 - **The renderer wrappers carry the unlock**, installed at
   `did-finish-load`. A usage request the app issues before that point is
   not wrapped (timing residual; not measured — needs a logged-in session).
-- The app's own client is axios 0.18.1 over XHR. The XHR wrapper is
-  proven on the real build against that adapter's settle condition
-  (`readyState === 4`, non-zero status) and against `loadend` listeners;
-  it has not been observed serving a real logged-in profile fetch.
+- The app's own client is axios 0.18.1 over XHR. The smoke probe issues
+  an XHR that settles exactly as that adapter does (`readyState === 4`,
+  non-zero status), so a fetch-only spoof fails the verdict
+  (`XHR limits not unlocked (app client path)`). The wrapper has not been
+  observed serving a real logged-in profile fetch.
 
 ## Why not `Module._load`?
 
@@ -104,9 +105,14 @@ HERETEK_SMOKE:{"ok":true,"failures":[],"results":{…}}
 ```
 
 Exit `0` unlocked, `1` locked (see `failures`), `2` no window within
-180 s. Headless Linux needs a display (`xvfb-run -a <bin> --no-sandbox
---disable-gpu --heretek-smoke`); see the workflow steps in
+180 s. The probe checks the seed, both usage GETs over `fetch`, the
+limits GET over XHR (the app's real client path), and that a POST is
+not intercepted. Headless Linux needs a display (`xvfb-run -a <bin>
+--no-sandbox --disable-gpu --heretek-smoke`); see the workflow steps in
 `.github/workflows/e2e.yml` and `release.yml` for the exact invocation.
+Where plain `xvfb-run` crashes on a vendor GL stack, force Mesa software
+rendering: `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+LIBGL_ALWAYS_SOFTWARE=1`.
 
 ## Auto-updater pin
 

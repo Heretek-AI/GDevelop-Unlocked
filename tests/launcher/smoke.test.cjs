@@ -21,6 +21,7 @@ const GOOD_RESULTS = {
   limits: { status: 200, maxCloudProjects: 999 },
   subscription: { status: 200, planId: 'gdevelop_startup' },
   passthrough: { resolved: false, spoofed: false, error: 'fetch failed' },
+  xhr: { status: 200, maxCloudProjects: 999 },
   errors: [],
 };
 
@@ -85,6 +86,21 @@ describe('smoke: verdict', () => {
       false
     );
     assert.equal(hook.verdictSmokeResults(null).ok, false);
+  });
+
+  it('fails when only fetch is unlocked (the app client rides XHR)', () => {
+    // The shape seen live before the XHR delivery fix: fetch probes green,
+    // the axios-style XHR never reaches readyState 4.
+    const hung = hook.verdictSmokeResults({
+      ...GOOD_RESULTS,
+      xhr: { status: 0, error: 'never settled' },
+    });
+    assert.equal(hung.ok, false);
+    assert.deepEqual(hung.failures, [
+      'XHR limits not unlocked (app client path): never settled',
+    ]);
+    const { xhr, ...fetchOnly } = GOOD_RESULTS;
+    assert.equal(hook.verdictSmokeResults(fetchOnly).ok, false);
   });
 
   it('flag parsing ignores position after the binary', () => {
