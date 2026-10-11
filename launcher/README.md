@@ -110,9 +110,11 @@ limits GET over XHR (the app's real client path), and that a POST is
 not intercepted. Headless Linux needs a display (`xvfb-run -a <bin>
 --no-sandbox --disable-gpu --heretek-smoke`); see the workflow steps in
 `.github/workflows/e2e.yml` and `release.yml` for the exact invocation.
-Where plain `xvfb-run` crashes on a vendor GL stack, force Mesa software
-rendering: `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
-LIBGL_ALWAYS_SOFTWARE=1`.
+On a machine with a vendor (e.g. NVIDIA) GL stack, Mesa software
+rendering can be forced with
+`__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+LIBGL_ALWAYS_SOFTWARE=1`; the smoke itself has run green both with and
+without it.
 
 ## Auto-updater pin
 
