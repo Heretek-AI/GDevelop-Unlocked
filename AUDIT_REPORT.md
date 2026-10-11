@@ -205,3 +205,45 @@ loop (B) and live-browser XHR proof (D), both still open follow-ups;
   follow-up in REBASE.md). Release tags older than the patch baseline
   fail loudly at dry-run by design — rebase per `REBASE.md` before
   building a new upstream tag.
+
+## 9. Verification + layer-3 addendum (2026-10-11, later session)
+
+Work is on branch `handoff/verify-and-tracker-2026-10-11`; `main` is
+unchanged. Suite on the branch: **129/129** (39 suites); `main` re-verified
+at 102/102 first. Layer-3 = the CI artifact from run `38106050979` driven
+headless over the DevTools protocol (Electron 32.3.3 / Chromium 128),
+logged out.
+
+Matrix updates:
+
+| # | Was | Now |
+|---|---|---|
+| D | PARTIAL — "XHR path hardened" | **Was broken in real Chromium, FIXED.** A spoofed usage GET never settled (`readyState 1`, `status 0`; no `loadend`): the injected fallback source is sloppy-mode, so assigning the getter-only XHR attributes silently no-ops. axios 0.18.1 (the app's client) hung forever. Fixed in `preload-unlock.cjs`; the smoke probe now includes an axios-style XHR and fails without it (negative-controlled on the real build; green in `e2e` on the stock release). Not proven: a real logged-in profile fetch. |
+| D (backstop) | "carries prod" | **Non-functional, documented.** The `webRequest` https → `data:` redirect is refused (`net::ERR_UNSAFE_REDIRECT`) for XHR and fetch; that layer fails requests rather than serving them. `launcher/README.md` "Known limits". |
+| S2 | OPEN | **CLOSED (documented + pinned).** Patch 07 inlines the predicates; `shim-wiring-contract.test.mjs` checks every hosted call site on a real patch-07 apply. The shim's fail-closed guard is not shipped. |
+| G3 | OPEN | **FIXED** — `--verify-only`, apply test runs verify + 4 negative controls. |
+| G4 | OPEN | **FIXED** — non-configurable fake + wrap-fail test; confirmed on real Electron. |
+| D1 | OPEN | **FIXED** — launcher README rewritten; updater message no longer prescribes `--asar`. |
+| G1 | FIXED (env honored) | **Completed** — the literal `/tmp/opencode` remained as the last-resort fallback, with predictable file names; generators now `mkdtemp` under `os.tmpdir()`. Output byte-identical (new `generate.test.mjs`). |
+| B | wiring fixed, liveness open | Sub-agent loop **ran on the real app** with the scripted mock (plan + 3 spawns, three role children `ready`). Not yet with a tool-capable real model. |
+
+New findings:
+
+| # | Severity | Finding | Status |
+|---|---|---|---|
+| U1 | HIGH | The built artifact still ships `resources/app-update.yml` → `4ian/GDevelop`. Deleting the `publish` key makes electron-builder 26 derive the feed from `package.json` `repository`. Inert on the Linux zip (needs AppImage); a live self-downgrade path on Windows NSIS / macOS. | **FIXED** — `publish: null`, config evaluated, build output asserted per OS |
+| U2 | MEDIUM | The green release build used `master/latest` `libGD.js`, not the pinned commit's (detached HEAD → `unknown-branch` → fallback). The C++ core could silently diverge from the IDE source. | **FIXED** — checkout as `master` + `REQUIRES_EXACT_LIBGD_JS_VERSION` |
+| A2 | HIGH | Chat attachments have no BYOK branch (`createAiAttachmentUploads/Downloads` + three callers): same class as finding A. Source-level; not exercised live. | **OPEN** — pinned as a known gap by the contract test |
+| P3 | LOW | The last code path naming a donor checkout: `generate-tier2-patches.mjs` defaulted `--fork` to `review/GDevelop-Heretek`. | **FIXED** — `--fork` required |
+
+Layer-3 results (all on the real build): logo + watermark uncheck with no
+dialog; 18 consecutive hot reloads with no dialog; network preview served;
+debugger tab opened; BYOK generation against a real local model (Ollama,
+`qwen2.5:0.5b`); 83 renderer requests recorded, 0 to
+`api.gdevelop.io/generation`. Per-item scope and what stays manual:
+issue #12.
+
+**Verdict:** the conditional PASS stands for the **patched-source build**,
+with A2 as the one open correctness gap in BYOK mode. The
+**launcher-only path** (stock build + injector) was not actually
+unlocking XHR traffic before this branch; do not rely on it from `main`.
