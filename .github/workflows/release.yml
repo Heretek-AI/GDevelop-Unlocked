@@ -42,6 +42,8 @@ jobs:
       - name: Apply all patches + Tier-2 overlay (fails loudly on drift)
         run: |
           node unlocked/scripts/apply-patches.mjs --target "$GITHUB_WORKSPACE/upstream"
+        env:
+          UPSTREAM_DIR: ${{ github.workspace }}/upstream
       - name: Neuter auto-updater feed (no update phone-home, ever)
         run: |
           node unlocked/scripts/strip-updater-feed.mjs "$GITHUB_WORKSPACE/upstream"
