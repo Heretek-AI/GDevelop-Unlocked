@@ -1,0 +1,105 @@
+name: release
+
+# Full-installer release: patched source -> built app -> smoke-gated publish.
+#
+# Manual dispatch per upstream release. Required human pre-steps before each
+# run (see patches/REBASE.md): merge-file pass on 07/08/11 against the new
+# tag, green suite, bumped UPSTREAM_BASELINE.json. The driver itself fails
+# loudly on drift, so a stale patch can never silently ship.
+#
+# Linux x64 first (proven toolchain); Win/Mac runners are a follow-up.
+# Unsigned portable builds (GD_PORTABLE_BUILD) until signing is set up —
+# disclosed on the release page, not hidden.
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Upstream tag to build (e.g. v5.6.283)'
+        required: true
+        default: 'v5.6.283'
+      publish:
+        description: 'Publish GitHub release after green smoke (true) or upload artifact only (false)'
+        required: false
+        default: 'false'
+
+env:
+  UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: unlocked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Clone upstream source at tag
+        run: |
+          git clone --depth 1 --branch "$UPSTREAM_TAG" https://github.com/4ian/GDevelop upstream
+      - name: Apply all patches + Tier-2 overlay (fails loudly on drift)
+        run: |
+          node unlocked/scripts/apply-patches.mjs --target "$GITHUB_WORKSPACE/upstream"
+        working-directory: unlocked
+      - name: Neuter auto-updater feed (no update phone-home, ever)
+        run: |
+          node unlocked/scripts/strip-updater-feed.mjs "$GITHUB_WORKSPACE/upstream"
+          grep -q 'publish:' upstream/newIDE/electron-app/electron-builder-config.js \
+            && { echo 'UPDATE FEED SURVIVED — refusing to build'; exit 1; } \
+            || echo 'update feed absent, building.'
+      - name: Install renderer deps + build web app
+        run: |
+          cd upstream/newIDE/app
+          npm install
+          npm run build
+        env:
+          GD_PORTABLE_BUILD: 'true'
+      - name: Install electron deps
+        run: |
+          cd upstream/newIDE/electron-app
+          npm install
+        env:
+          GD_PORTABLE_BUILD: 'true'
+      - name: Build Linux zip (unsigned portable)
+        run: |
+          cd upstream/newIDE/electron-app
+          npm run build -- --linux zip --x64
+        env:
+          GD_PORTABLE_BUILD: 'true'
+      - name: Smoke the built app (hook must hold on the real bundle)
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb unzip
+          BUILD_OUT="$(find upstream/newIDE/electron-app/dist -maxdepth 1 -name '*.zip' | head -n 1)"
+          echo "smoking $BUILD_OUT"
+          mkdir -p /tmp/rel/app && unzip -q "$BUILD_OUT" -d /tmp/rel/app
+          BIN="$(find /tmp/rel/app -maxdepth 2 -type f -name 'gdevelop*' | head -n 1)"
+          export HOME=/tmp/rel/home && mkdir -p "$HOME"
+          xvfb-run -a "$BIN" --no-sandbox --disable-gpu \
+            --disable-dev-shm-usage --user-data-dir=/tmp/rel/profile \
+            --heretek-smoke > /tmp/rel/smoke.log 2>&1
+          grep -a "HERETEK_SMOKE:" /tmp/rel/smoke.log | tail -1 > /tmp/rel/verdict.json
+          node -e "
+            const fs = require('fs');
+            const line = fs.readFileSync('/tmp/rel/verdict.json', 'utf8');
+            const verdict = JSON.parse(line.slice(line.indexOf('HERETEK_SMOKE:') + 14));
+            console.log(JSON.stringify(verdict, null, 2));
+            if (!verdict.ok) { console.error('SMOKE FAILED:', verdict.failures); process.exit(1); }
+            console.log('release smoke passed on built-from-patched-source app.');
+          "
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdevelop-unlocked-linux-x64-${{ inputs.upstream_tag }}
+          path: upstream/newIDE/electron-app/dist/*.zip
+      - name: Publish GitHub release
+        if: inputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: unlocked-${{ inputs.upstream_tag }}
+          name: GDevelop-Unlocked ${{ inputs.upstream_tag }}
+          body: |
+            Full build from patched upstream ${{ inputs.upstream_tag }} (11 patches + Tier-2 overlay + launcher hook).
+            Unsigned portable build. Auto-update DISABLED by design — re-download per release, never auto-updated over.
+          files: upstream/newIDE/electron-app/dist/*.zip
