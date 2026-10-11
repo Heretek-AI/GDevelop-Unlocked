@@ -119,6 +119,8 @@ function setXhrResponse(xhr, body) {
       writable: true,
     });
   });
+  // Remembered so the next open() on this instance can remove them.
+  xhr.__heretekShadowed = Object.keys(state);
 }
 
 function fireXhrLoad(xhr) {
@@ -143,6 +145,16 @@ function patchXhr(XHRClass, scope) {
   const originalOpen = XHRClass.prototype.open;
   const originalSend = XHRClass.prototype.send;
   XHRClass.prototype.open = function heretekOpen(method, url) {
+    // open() re-initializes an XHR: drop the state a previous spoofed
+    // response shadowed onto this instance, so the native getters show
+    // through again for whatever request comes next.
+    if (this.__heretekShadowed) {
+      const self = this;
+      this.__heretekShadowed.forEach(function unshadowXhrState(name) {
+        delete self[name];
+      });
+      this.__heretekShadowed = null;
+    }
     this.__heretekMethod = method;
     this.__heretekUrl = url;
     return originalOpen.apply(this, arguments);

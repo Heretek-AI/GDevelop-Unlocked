@@ -188,6 +188,28 @@ describe('preload: XHR spoof against real-XMLHttpRequest semantics', () => {
     assert.equal(viaLoadend.data.planId, 'gdevelop_startup');
   });
 
+  it('a reused XHR does not keep the spoofed state on its next request', async () => {
+    // open() re-initializes an XHR. The per-instance shadows from a spoofed
+    // response must go, or a later real request reads back the old 200.
+    const { scope } = makeScope();
+    const XHR = preload.patchXhr(makeRealisticXhrClass(), scope);
+    const xhr = new XHR();
+    await new Promise(resolve => {
+      xhr.onloadend = resolve;
+      xhr.open('GET', LIMITS);
+      xhr.send();
+    });
+    assert.equal(xhr.readyState, 4);
+    assert.equal(xhr.status, 200);
+
+    xhr.open('POST', LIMITS); // not spoofed: goes to the real send
+    assert.equal(xhr.readyState, 1, 'stale spoofed readyState after open()');
+    assert.equal(xhr.status, 0, 'stale spoofed status after open()');
+    assert.equal(xhr.responseText, '', 'stale spoofed body after open()');
+    xhr.send();
+    assert.deepEqual(xhr.sent, [LIMITS]);
+  });
+
   it('injected fallback source (the production path) settles the same consumers', async () => {
     // The hook injects this string with executeJavaScript whenever the
     // BrowserWindow export is not wrappable — i.e. always, in production.
