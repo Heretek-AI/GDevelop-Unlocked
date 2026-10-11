@@ -322,7 +322,11 @@ const SMOKE_ARG = '--heretek-smoke';
 const SMOKE_TIMEOUT_MS = 180000;
 
 function isSmokeMode(argv) {
-  return ((argv || process.argv).slice(2) || []).includes(SMOKE_ARG);
+  // Packaged Electron argv is [exe, ...userArgs] (no script element);
+  // node argv is [node, script, ...userArgs]. Scan everything past the
+  // executable instead of assuming a script slot, otherwise a first-arg
+  // --heretek-smoke is silently dropped in production.
+  return ((argv || process.argv).slice(1) || []).includes(SMOKE_ARG);
 }
 
 // Self-contained: no references outside this string (runs in the

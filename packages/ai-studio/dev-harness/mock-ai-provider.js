@@ -26,7 +26,8 @@
  * developing.
  */
 
-const http = require('http');
+import http from 'node:http';
+import fs from 'node:fs';
 
 const PORT = Number(process.env.PORT) || 11435;
 const MODEL = process.env.MODEL || 'mock-city-builder';
@@ -52,7 +53,7 @@ const loadScript = () => {
   const path = process.env.MOCK_SCRIPT;
   if (!path) return null;
   try {
-    const parsed = JSON.parse(require('fs').readFileSync(path, 'utf8'));
+    const parsed = JSON.parse(fs.readFileSync(path, 'utf8'));
     return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
   } catch (error) {
     console.error('MOCK_SCRIPT could not be read:', error.message);
@@ -82,7 +83,7 @@ const loadChildScripts = () => {
   const path = process.env.MOCK_CHILD_SCRIPTS;
   if (!path) return null;
   try {
-    const parsed = JSON.parse(require('fs').readFileSync(path, 'utf8'));
+    const parsed = JSON.parse(fs.readFileSync(path, 'utf8'));
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? parsed
       : null;

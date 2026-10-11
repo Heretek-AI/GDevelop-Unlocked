@@ -27,10 +27,32 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, '..');
 const PATCHES_DIR = path.join(ROOT, 'patches');
 const LAUNCHER_DIR = path.join(ROOT, 'launcher');
+const AI_STUDIO_DIR = path.join(ROOT, 'packages', 'ai-studio');
 const LAUNCHER_FILES = [
   'heretek-hook.cjs',
   'preload-unlock.cjs',
   'unlock-payloads.cjs',
+];
+// Tier-2 runtime the glue patches import: Generation.js (07) and
+// PrepareAiUserContent.js (09) import ../../AI/CustomAIClient;
+// AskAiEditorContainer.js (11) imports ./Studio/* hooks. Upstream has no
+// newIDE/app/src/AI/ directory at all, so without this overlay every
+// Tier-2 import dangles (previously nothing installed Tier-2).
+// Spec files (*.spec.js) are deliberately NOT shipped into the target.
+const TIER2_FILES = [
+  'AI/CustomAIClient.js',
+  'AiGeneration/Studio/EditApprovalLabel.js',
+  'AiGeneration/Studio/FinalizeSubAgents.js',
+  'AiGeneration/Studio/LoopGuard.js',
+  'AiGeneration/Studio/NudgePolicy.js',
+  'AiGeneration/Studio/PlanStore.js',
+  'AiGeneration/Studio/RequestWriteGate.js',
+  'AiGeneration/Studio/Roles.js',
+  'AiGeneration/Studio/RoleToolPolicy.js',
+  'AiGeneration/Studio/SafeTruncation.js',
+  'AiGeneration/Studio/SpawnSubAgents.js',
+  'AiGeneration/Studio/UseStudioNudge.js',
+  'AiGeneration/Studio/UseStudioRuntime.js',
 ];
 
 // Post-apply contract: what a correctly patched tree must (and must not)
@@ -138,6 +160,34 @@ const MARKERS = [
     patch: '08-preferences-ai.patch',
     file: 'newIDE/app/src/MainFrame/Preferences/PreferencesStorage.js',
     includes: ['getPersistablePreferences', 'aiCustomApiKey'],
+    excludes: [],
+  },
+  {
+    patch: '09-prepare-ai-content.patch',
+    file: 'newIDE/app/src/AiGeneration/PrepareAiUserContent.js',
+    includes: [
+      "import { isCustomEndpointEnabled } from '../AI/CustomAIClient';",
+      "if (isCustomEndpointEnabled() || (userId && userId.startsWith('local-')))",
+    ],
+    excludes: [],
+  },
+  {
+    patch: '10-ai-chat-affordance.patch',
+    file: 'newIDE/app/src/AiGeneration/AiRequestChat/Utils.js',
+    includes: [
+      'export const getAvailableCredits',
+      'export const canAffordAiRequest',
+    ],
+    excludes: [],
+  },
+  {
+    patch: '11-studio-runtime-mount.patch',
+    file: 'newIDE/app/src/AiGeneration/AskAiEditorContainer.js',
+    includes: [
+      "import { useStudioRuntime } from './Studio/UseStudioRuntime';",
+      "import { useStudioNudge } from './Studio/UseStudioNudge';",
+      'canAffordAiRequest',
+    ],
     excludes: [],
   },
 ];
@@ -261,8 +311,41 @@ function syncLauncherFiles(target) {
   }
 }
 
+/**
+ * Copy Tier-2 runtime (packages/ai-studio/) into the patched tree at the
+ * exact paths the glue patches import (newIDE/app/src/AI/*,
+ * newIDE/app/src/AiGeneration/Studio/*). Runs after every successful
+ * apply so `../AI/CustomAIClient` / `./Studio/*` imports can never dangle.
+ */
+function syncTier2Files(target) {
+  for (const rel of TIER2_FILES) {
+    const src = path.join(AI_STUDIO_DIR, rel);
+    if (!fs.existsSync(src)) {
+      console.error(`[apply-patches] Tier-2 file missing: ${src}`);
+      process.exit(2);
+    }
+    const dest = path.join(target, 'newIDE/app/src', rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    console.log(`[apply-patches] synced ai-studio/${rel}`);
+  }
+}
+
 function verifyTarget(target) {
   let failed = 0;
+  for (const rel of TIER2_FILES) {
+    const abs = path.join(target, 'newIDE/app/src', rel);
+    if (!fs.existsSync(abs)) {
+      console.error(`[verify] MISSING Tier-2 runtime file: newIDE/app/src/${rel}`);
+      failed++;
+      continue;
+    }
+    const src = fs.readFileSync(path.join(AI_STUDIO_DIR, rel), 'utf8');
+    if (fs.readFileSync(abs, 'utf8') !== src) {
+      console.error(`[verify] STALE Tier-2 runtime file: newIDE/app/src/${rel}`);
+      failed++;
+    }
+  }
   for (const file of LAUNCHER_FILES) {
     const abs = path.join(target, 'newIDE/electron-app/app', file);
     if (!fs.existsSync(abs)) {
@@ -360,6 +443,7 @@ if (args.asar) {
     );
     applyToTarget(workdir);
     syncLauncherFiles(workdir);
+    syncTier2Files(workdir);
     if (!args.noVerify) verifyTarget(workdir);
     // Auto-updater pin (issue #3 pre-note): never ship a repacked asar
     // without recording which upstream version it came from.
@@ -374,6 +458,7 @@ if (args.asar) {
 if (args.target) {
   applyToTarget(args.target);
   syncLauncherFiles(args.target);
+  syncTier2Files(args.target);
   if (!args.noVerify) verifyTarget(args.target);
   process.exit(0);
 }

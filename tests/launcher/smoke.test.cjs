@@ -90,6 +90,15 @@ describe('smoke: verdict', () => {
   it('flag parsing ignores position after the binary', () => {
     assert.equal(hook.isSmokeMode(['node', 'app', '--heretek-smoke']), true);
     assert.equal(hook.isSmokeMode(['node', 'app']), false);
+    // Packaged Electron argv has no script slot: [exe, ...userArgs].
+    // The flag must be found even when it is the FIRST user argument
+    // (previously slice(2) silently dropped it and smoke never armed).
+    assert.equal(hook.isSmokeMode(['/tmp/e2e/app/gdevelop', '--heretek-smoke']), true);
+    assert.equal(
+      hook.isSmokeMode(['/tmp/e2e/app/gdevelop', '--heretek-smoke', '--no-sandbox']),
+      true
+    );
+    assert.equal(hook.isSmokeMode(['/tmp/e2e/app/gdevelop']), false);
   });
 });
 

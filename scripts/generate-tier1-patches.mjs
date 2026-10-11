@@ -48,7 +48,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--upstream') out.upstream = path.resolve(argv[++i]);
     else if (argv[i] === '--out') out.out = path.resolve(argv[++i]);
-    else out.out = path.join(ROOT, 'patches');
+    else throw new Error(`Unknown argument: ${argv[i]} (expected --upstream <dir> or --out <dir>)`);
   }
   if (!out.out) out.out = path.join(ROOT, 'patches');
   return out;
@@ -447,9 +447,11 @@ for (const patch of PATCHES) {
     const patchedText = patch.transform(upstreamText, rel);
     if (patchedText === upstreamText)
       throw new Error(`Patch ${patch.name} changed nothing in ${rel}.`);
-    const tmpOld = path.join('/tmp/opencode', `gen-old-${Date.now()}.txt`);
-    const tmpNew = path.join('/tmp/opencode', `gen-new-${Date.now()}.txt`);
-    fs.mkdirSync('/tmp/opencode', { recursive: true });
+    const scratchBase =
+      process.env.TMPDIR || process.env.TMP || process.env.TEMP || '/tmp/opencode';
+    const tmpOld = path.join(scratchBase, `gen-old-${Date.now()}.txt`);
+    const tmpNew = path.join(scratchBase, `gen-new-${Date.now()}.txt`);
+    fs.mkdirSync(scratchBase, { recursive: true });
     fs.writeFileSync(tmpOld, upstreamText);
     fs.writeFileSync(tmpNew, patchedText);
     const r = spawnSync(
@@ -465,11 +467,11 @@ for (const patch of PATCHES) {
       );
     combined += r.stdout;
     // Round-trip check: the hunk must apply cleanly to a pristine copy.
-    const checkDir = path.join('/tmp/opencode', `gen-rt-${Date.now()}`);
+    const checkDir = path.join(scratchBase, `gen-rt-${Date.now()}`);
     const checkFile = path.join(checkDir, rel);
     fs.mkdirSync(path.dirname(checkFile), { recursive: true });
     fs.writeFileSync(checkFile, upstreamText);
-    const tmpPatch = path.join('/tmp/opencode', `gen-rt-${Date.now()}.patch`);
+    const tmpPatch = path.join(scratchBase, `gen-rt-${Date.now()}.patch`);
     fs.writeFileSync(tmpPatch, r.stdout);
     const dry = spawnSync('patch', ['-p1', '--dry-run', '-i', tmpPatch], {
       cwd: checkDir,

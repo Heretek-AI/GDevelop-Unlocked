@@ -1,6 +1,8 @@
-// Generates Tier-2 glue patches as VERBATIM fork deltas (Phase 4).
-// Unlike Tier-1 (curated minimal hunks), the Generation + Preferences
-// deltas are woven through their files, so the patch carries the exact
+// Generates Tier-2 glue patches as VERBATIM fork deltas (Phase 4) —
+// currently only the purely-additive 09/10 (see patches/REBASE.md: 07/08/11
+// are curated forward-ports, NOT verbatim deltas, and must never be
+// regenerated here). Unlike Tier-1 (curated minimal hunks), the 09/10
+// deltas are woven through their files, so each patch carries the exact
 // fork diff — no hand-editing, no silent shaping.
 //
 //   node scripts/generate-tier2-patches.mjs --upstream review/GDevelop --fork review/GDevelop-Heretek
@@ -17,20 +19,20 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, '..');
 
 const PATCHES = [
+  // Verbatim fork deltas (safe: the fork postdates upstream on these
+  // files, so the diff is purely additive — no upstream-new code to
+  // delete). Pinned byte-for-byte by tier2-patches.test.mjs.
   {
-    name: '07-generation-glue.patch',
-    files: ['newIDE/app/src/Utils/GDevelopServices/Generation.js'],
+    name: '09-prepare-ai-content.patch',
+    files: ['newIDE/app/src/AiGeneration/PrepareAiUserContent.js'],
   },
   {
-    name: '08-preferences-ai.patch',
-    files: [
-      'newIDE/app/src/MainFrame/Preferences/PreferencesDialog.js',
-      'newIDE/app/src/MainFrame/Preferences/PreferencesContext.js',
-      'newIDE/app/src/MainFrame/Preferences/PreferencesProvider.js',
-      // Fork-only: carried as a new-file hunk.
-      'newIDE/app/src/MainFrame/Preferences/PreferencesStorage.js',
-    ],
+    name: '10-ai-chat-affordance.patch',
+    files: ['newIDE/app/src/AiGeneration/AiRequestChat/Utils.js'],
   },
+  // NOTE: 07/08/11 are curated forward-ports (see patches/REBASE.md), NOT
+  // verbatim deltas — generating them here would reintroduce reverts of
+  // upstream-new code. They are intentionally absent from this list.
 ];
 
 function parseArgs(argv) {
@@ -63,6 +65,9 @@ function diffFile(upstreamAbs, forkAbs, rel, isNew) {
 }
 
 const args = parseArgs(process.argv.slice(2));
+const scratchBase =
+  process.env.TMPDIR || process.env.TMP || process.env.TEMP || '/tmp/opencode';
+fs.mkdirSync(scratchBase, { recursive: true });
 fs.mkdirSync(args.out, { recursive: true });
 
 for (const patch of PATCHES) {
@@ -75,9 +80,9 @@ for (const patch of PATCHES) {
       throw new Error(`Fork file missing: ${rel}`);
     combined += diffFile(upstreamAbs, forkAbs, rel, isNew);
   }
-  const checkDir = path.join('/tmp/opencode', `tier2-rt-${Date.now()}`);
+  const checkDir = path.join(scratchBase, `tier2-rt-${Date.now()}`);
   fs.mkdirSync(checkDir, { recursive: true });
-  const tmpPatch = path.join('/tmp/opencode', `tier2-rt-${Date.now()}.patch`);
+  const tmpPatch = path.join(scratchBase, `tier2-rt-${Date.now()}.patch`);
   fs.writeFileSync(tmpPatch, combined);
   // Round-trip against pristine upstream copies of exactly these files.
   for (const rel of patch.files) {

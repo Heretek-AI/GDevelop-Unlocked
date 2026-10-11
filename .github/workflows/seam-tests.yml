@@ -24,7 +24,7 @@ jobs:
       - name: Clone fork donor baseline
         run: |
           git clone --no-checkout https://github.com/Heretek-AI/GDevelop-Heretek review/GDevelop-Heretek
-          git -C review/GDevelop-Heretek checkout b9109cfbaaaf19c31b5af4d315317fb67d8903c3
+          git -C review/GDevelop-Heretek checkout f7d450a1d9aa068e33c0a0c9a3f9caaee3701f2f
       - name: Run full suite (seams + patcher + launcher + tier-2 + web)
         run: npm test
       - name: Patcher gate (seams + patch inventory)

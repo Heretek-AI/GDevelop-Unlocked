@@ -36,6 +36,18 @@ describe('tier-2: verbatim extraction', () => {
         fs.existsSync(donorAbs),
         `donor moved in fork: ${meta.donor} (update scripts/extract-tier2.mjs explicitly)`
       );
+      if (pkgRel.startsWith('dev-harness/')) {
+        // Dev harness is ported, not vendored: the repo root is
+        // "type": "module" so the donor's CJS `require` throws
+        // ReferenceError here (see mock-ai-provider.js ESM port). The
+        // MANIFEST sha below still pins the exact bytes we ship.
+        assert.equal(
+          sha256(pkgAbs),
+          meta.sha256,
+          `manifest stale for ${pkgRel} (re-run the extractor)`
+        );
+        continue;
+      }
       assert.equal(
         sha256(pkgAbs),
         sha256(donorAbs),
