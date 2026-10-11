@@ -243,6 +243,12 @@ debugger tab opened; BYOK generation against a real local model (Ollama,
 `api.gdevelop.io/generation`. Per-item scope and what stays manual:
 issue #12.
 
+CI on the branch (2026-10-11): `release` run `38169760800`
+(`publish=false`, ref `8301cdc`) built and smoked Linux, Windows (nsis +
+zip) and macOS (universal, ad-hoc signed) — all `ok:true` including the
+XHR probe, exact `libGD.js`, no `app-update.yml` in any build output.
+`e2e` `38169762424` and `seam-tests` `38169764070` green.
+
 **Verdict:** the conditional PASS stands for the **patched-source build**,
 with A2 as the one open correctness gap in BYOK mode. The
 **launcher-only path** (stock build + injector) was not actually
