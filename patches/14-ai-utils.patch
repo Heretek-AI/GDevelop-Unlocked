@@ -1,0 +1,774 @@
+--- a/newIDE/app/src/AiGeneration/Utils.js
++++ b/newIDE/app/src/AiGeneration/Utils.js
+@@ -21,7 +21,6 @@
+ } from './ExtensionsOutsideEditorChangesAccumulator';
+ import { type EventsFunctionsExtensionsState } from '../EventsFunctionsExtensionsLoader/EventsFunctionsExtensionsContext';
+ import {
+-  getAiRequest,
+   getAiRequestSuggestions,
+   type AiRequest,
+   type AiRequestMessage,
+@@ -45,6 +44,8 @@
+   getLastMessagesFromAiRequestOutput,
+   getLatestActivePlan,
+   getSubAgentKind,
++  isUserMessage,
++  shouldFetchAiRequestSuggestions,
+ } from './AiRequestUtils';
+ import { useEnsureExtensionInstalled } from './UseEnsureExtensionInstalled';
+ import { useGenerateEvents } from './UseGenerateEvents';
+@@ -62,6 +63,31 @@
+ import { makeSimplifiedProjectBuilder } from '../EditorFunctions/SimplifiedProject/SimplifiedProject';
+ import { prepareAiUserContent } from './PrepareAiUserContent';
+ import { extractGDevelopApiErrorStatusAndCode } from '../Utils/GDevelopServices/Errors';
++import {
++  isCustomEndpointEnabled,
++  LOCAL_BYOK_USER_ID,
++} from '../AI/CustomAIClient';
++import {
++  isSpawnAgentCall,
++  spawnSubAgent,
++  buildGddContextNote,
++  countLiveSubAgentsForParent,
++  MAX_SUB_AGENTS_PER_PARENT,
++} from './Studio/SpawnSubAgents';
++import { createLoopGuard } from './Studio/LoopGuard';
++import {
++  mergePlanResultOutput,
++  patchPlanTaskAsDelegated,
++  replacePlanMessage,
++} from './Studio/PlanStore';
++import { isSubAgentAtTurnCap } from './Studio/FinalizeSubAgents';
++import { getRoleToolPolicy, isRoleReadOnly } from './Studio/RoleToolPolicy';
++import { MUTATING_TOOL_NAMES } from './Studio/Roles';
++import { getEditApprovalLaunchingCall } from './Studio/EditApprovalLabel';
++import {
++  createRequestWriteQueue,
++  getRequestWriteBlock,
++} from './Studio/RequestWriteGate';
+ import UnsavedChangesContext from '../MainFrame/UnsavedChangesContext';
+ import {
+   type FileMetadata,
+@@ -213,12 +239,10 @@
+   editorCallbacks: EditorCallbacks,
+ |}): React.Node => {
+   if (aiRequest.parentAiRequestId) {
+-    const parentRequest = aiRequests[aiRequest.parentAiRequestId] || null;
+-    const launchingCall = parentRequest
+-      ? getAllSubAgentFunctionCalls({ aiRequest: parentRequest }).find(
+-          functionCall => functionCall.subAgentAiRequestId === aiRequest.id
+-        )
+-      : null;
++    const launchingCall = getEditApprovalLaunchingCall({
++      aiRequest,
++      aiRequests,
++    });
+     if (launchingCall) {
+       return renderFunctionCallLabel({
+         functionCall: launchingCall,
+@@ -244,6 +268,7 @@
+   editorCallbacks,
+   aiRequestsToProcess,
+   onSendEditorFunctionCallResults,
++  isStudioEnabled,
+   getEditorFunctionCallResults,
+   addEditorFunctionCallResults,
+   onSceneEventsModifiedOutsideEditor,
+@@ -265,6 +290,9 @@
+   suspendAiRequest,
+   requestEditApproval,
+   onSaveProjectAsWithStorageProvider,
++  activateSubAgent,
++  updateAiRequest,
++  isSendingAiRequest,
+ }: {|
+   i18n: I18nType,
+   project: ?gdProject,
+@@ -280,7 +308,7 @@
+       createdExternalLayoutNames?: Array<string>,
+       createdProject?: ?gdProject,
+     |}
+-  ) => Promise<void>,
++  ) => Promise<boolean>,
+   getEditorFunctionCallResults: string => Array<EditorFunctionCallResult> | null,
+   addEditorFunctionCallResults: (
+     string,
+@@ -319,6 +347,9 @@
+   onWillInstallExtension: (extensionNames: Array<string>) => void,
+   onExtensionInstalled: (extensionNames: Array<string>) => void,
+   isReadyToProcessFunctionCalls: boolean,
++  // Whether this view runs the multi-agent studio (the editor does; the
++  // stand-alone form does not, so it cannot spawn sub-agents).
++  isStudioEnabled?: boolean,
+   getIsAutoEditEnabled: () => boolean,
+   suspendAiRequest: (aiRequestId: string) => Promise<void>,
+   requestEditApproval: (request: EditApprovalRequest) => Promise<boolean>,
+@@ -331,12 +362,30 @@
+       createdProject?: gdProject,
+     |}
+   ) => Promise<?FileMetadata>,
++  // Activates a studio sub-agent so the context polls it and the editor
++  // processes its function calls (see `AiRequestContext.activateSubAgent`).
++  activateSubAgent: (
++    subAgentAiRequestId: string,
++    parentAiRequestId: string,
++    callId: string
++  ) => void,
++  // Writes a request (used by the studio loop guard to mark a request failed).
++  updateAiRequest: (
++    aiRequestId: string,
++    updateFn: (previousAiRequest: ?AiRequest) => AiRequest
++  ) => void,
++  // Whether a user send is in flight for a request (read by the write gate).
++  isSendingAiRequest: (aiRequestId: string | null) => boolean,
+ |}): {
+   onProcessFunctionCalls: (
+     aiRequest: AiRequest,
+     functionCalls: Array<AiRequestMessageAssistantFunctionCall>
+   ) => Promise<void>,
+   clearApprovedEditBatches: () => void,
++  enqueueRequestWrite: (
++    aiRequestId: string,
++    write: () => Promise<void>
++  ) => Promise<void>,
+ } => {
+   const { ensureExtensionInstalled } = useEnsureExtensionInstalled({
+     project,
+@@ -424,6 +473,14 @@
+   // `call:<callId>` (for a single direct modifying call like generate_events).
+   const approvedEditBatchKeysRef = React.useRef<Set<string>>(new Set());
+ 
++  // One loop guard per local AI request (see `Studio/LoopGuard.js`): it counts
++  // consecutive identical calls, consecutive failures and turns, so a local
++  // agent that loops cannot run forever.
++  const loopGuardsRef = React.useRef<Map<string, any>>(new Map());
++  const loopGuardLastUserMessageIdRef = React.useRef<Map<string, string>>(
++    new Map()
++  );
++
+   // Forget all previously-granted edit approvals so the next modifying call
+   // asks again. Called when the user toggles auto-edit: turning it on then off
+   // again means they want to review the upcoming edits, even within a sub-agent
+@@ -440,6 +497,16 @@
+       if (!isReadyToProcessFunctionCalls) return;
+       if (aiRequest.status === 'suspended') return;
+ 
++      // A studio sub-agent that has used up its role's turn budget takes no
++      // further turn (the studio finalizes it with its last message). Return
++      // before taking any in-flight lock.
++      if (
++        isCustomEndpointEnabled() &&
++        isSubAgentAtTurnCap({ aiRequest, aiRequests: aiRequestsRef.current })
++      ) {
++        return;
++      }
++
+       const functionCallsToProcess = functionCalls.filter(
+         functionCall =>
+           !inFlightFunctionCallIdsRef.current.has(
+@@ -460,14 +527,60 @@
+         );
+       });
+ 
++      // The studio role a sub-agent was spawned with restricts its tool subset
++      // (defense in depth: the model is offered only these, and anything else it
++      // still calls is refused here). All denied calls stay in
++      // `functionCallsToProcess` so their in-flight locks are released below.
++      // The role policy is resolved through a helper (see `getRoleToolPolicy`):
++      // `aiRequest.studioRoleId` is persisted and unvalidated, so an
++      // unrecognized id denies every call rather than throwing (which would
++      // stall the batch before a single call is dispatched) or being treated as
++      // "no role" (which would hand a read-only sub-agent every tool).
++      const studioRoleId = aiRequest.studioRoleId || null;
++      const rolePolicy = getRoleToolPolicy(studioRoleId);
++      const studioDeniedCallIds = new Set<string>();
++      // The denial results must be SENT to the model (not only recorded): a
++      // batch where every call was role-denied has no editor call, and if the
++      // denials are never sent the model never gets a function_call_output, the
++      // batch is reprocessed and the request loops until the loop guard trips
++      // (observed live, cycle 239).
++      const studioDeniedResults: Array<EditorFunctionCallResult> = [];
++      if (studioRoleId) {
++        for (const functionCall of functionCallsToProcess) {
++          if (!rolePolicy.allowedToolNames.includes(functionCall.name)) {
++            studioDeniedCallIds.add(functionCall.call_id);
++            const denial = {
++              status: 'finished',
++              call_id: functionCall.call_id,
++              success: false,
++              output: {
++                message: rolePolicy.roleResolved
++                  ? `The tool ${
++                      functionCall.name
++                    } is not available for the ${String(
++                      rolePolicy.displayName
++                    )} role.`
++                  : `The tool ${
++                      functionCall.name
++                    } is not available: this sub-agent's studio role could not be resolved.`,
++              },
++            };
++            studioDeniedResults.push(denial);
++            addEditorFunctionCallResults(aiRequest.id, [denial]);
++          }
++        }
++      }
++
+       // An explorer sub-agent's script is read-only (see below: it is exposed
+       // only non-mutating functions). Knowing this lets us both skip its edit
+-      // approval and restrict the functions its `run_script` can call.
++      // approval and restrict the functions its `run_script` can call. A
++      // read-only studio role is read-only too.
+       const subAgentKind = getSubAgentKind({
+         aiRequest,
+         aiRequests: aiRequestsRef.current,
+       });
+-      const isReadOnlyScriptContext = subAgentKind === 'explorer';
++      const isReadOnlyScriptContext =
++        subAgentKind === 'explorer' || isRoleReadOnly(studioRoleId);
+ 
+       // Gate project-modifying calls behind a user confirmation when auto-edit
+       // is off. Read-only calls (exploration, inspection) always run. The first
+@@ -493,10 +606,16 @@
+         const modifyingFunctionCalls = functionCallsToProcess.filter(
+           functionCall =>
+             doesFunctionCallModifyProject(functionCall) &&
++            // A call the role filter already refused is not dispatched, so
++            // asking the user to approve it would prompt for nothing.
++            !studioDeniedCallIds.has(functionCall.call_id) &&
+             // An explorer sub-agent's `run_script` is read-only (exposed only
+             // non-mutating functions), so it never needs an edit approval even
+             // though `run_script` is declared as project-modifying.
+             !(isReadOnlyScriptContext && functionCall.name === 'run_script') &&
++            // A read-only studio role never raises the prompt (its subset was
++            // fixed at spawn and is enforced by the dispatch filter above).
++            !isRoleReadOnly(studioRoleId) &&
+             !isCallApproved(functionCall)
+         );
+ 
+@@ -554,13 +673,278 @@
+         }
+       }
+ 
++      // The local loop guard: with no server under BYOK, nothing else stops an
++      // agent looping on fresh call ids. Only recorded for local requests - the
++      // hosted backend enforces its own `repeated-tool-call-loop` error, and a
++      // second client-side trip over the same condition would double-report.
++      // One guard per request (persisted across passes) so its counters
++      // accumulate; reset on a new user message.
++      const loopGuardHandledCallIds = new Set<string>();
++      // The loop-guard warning must reach the model like any other result:
++      // recording it without sending it means the model never learns to stop.
++      const loopGuardResults: Array<EditorFunctionCallResult> = [];
++      const guard = isCustomEndpointEnabled()
++        ? loopGuardsRef.current.get(aiRequest.id) || createLoopGuard()
++        : null;
++      if (guard) {
++        loopGuardsRef.current.set(aiRequest.id, guard);
++        const lastUserMessage = (aiRequest.output || [])
++          .filter(isUserMessage)
++          .pop();
++        const currentLastUserMessageId = lastUserMessage
++          ? (lastUserMessage: any).messageId
++          : null;
++        const seenLastUserMessageId = loopGuardLastUserMessageIdRef.current.get(
++          aiRequest.id
++        );
++        if (
++          currentLastUserMessageId &&
++          currentLastUserMessageId !== seenLastUserMessageId
++        ) {
++          guard.reset();
++          loopGuardLastUserMessageIdRef.current.set(
++            aiRequest.id,
++            currentLastUserMessageId
++          );
++        }
++        functionCallsToProcess.forEach(functionCall => {
++          guard.recordToolCall({
++            name: functionCall.name,
++            arguments: functionCall.arguments,
++          });
++        });
++        guard.recordTurn();
++        // A sub-agent that only inspects turn after turn is stuck (the
++        // objective's "no project mods over N turns" signature). The manager is
++        // exempt: delegating without editing is exactly its job.
++        if (aiRequest.studioRoleId) {
++          const madeProgress = functionCallsToProcess.some(functionCall =>
++            MUTATING_TOOL_NAMES.includes(functionCall.name)
++          );
++          guard.recordProgress(madeProgress);
++        }
++
++        const decision = guard.evaluate();
++        if (decision.action === 'steer' || decision.action === 'constrain') {
++          const loopGuardMessage = `The local agent looks stuck (${
++            decision.reason
++          }). Stop repeating this action and change approach, or report the problem.`;
++          // Pair the warning with the batch's first real call: an unpaired
++          // `function_call_output` (a call the model never made) is rejected by
++          // OpenAI-compatible APIs.
++          const guardedCall = functionCallsToProcess[0];
++          const guardResult = {
++            status: 'finished',
++            call_id: guardedCall.call_id,
++            success: false,
++            output: { message: loopGuardMessage },
++          };
++          loopGuardResults.push(guardResult);
++          addEditorFunctionCallResults(aiRequest.id, [guardResult]);
++          loopGuardHandledCallIds.add(guardedCall.call_id);
++        }
++        if (decision.action === 'constrain') {
++          // Stop issuing further turns for this request. The request is marked
++          // as failed with the error code the existing error UI already
++          // classifies as "The AI got stuck" (`AiRequestErrorRow.js`), so no
++          // new UI is needed for it.
++          console.warn(
++            `[studio] loop guard constrained the local request ${
++              aiRequest.id
++            }: ${decision.reason}`
++          );
++          updateAiRequest(aiRequest.id, currentRequest => ({
++            ...(currentRequest || {
++              id: aiRequest.id,
++              createdAt: new Date().toISOString(),
++              userId: 'local-byok-user',
++              error: null,
++              output: [],
++            }),
++            status: 'error',
++            updatedAt: new Date().toISOString(),
++            error: {
++              code: 'repeated-tool-call-loop',
++              message: `The local agent was stopped after ${decision.reason}.`,
++            },
++          }));
++          try {
++            await suspendAiRequest(aiRequest.id);
++          } catch (error) {
++            console.error(
++              'Error while suspending a request stopped by the loop guard:',
++              error
++            );
++          }
++          return;
++        }
++      }
++
++      // The local studio's delegation tool is not an editor function: it creates
++      // a child AI request and stamps the call so the shared loop stops treating
++      // it as a call for the editor to execute (`getFunctionCallsToProcess`
++      // skips calls carrying a `subAgentAiRequestId`). Only under BYOK: the
++      // hosted backend never emits this tool name, so hosted behaviour is
++      // untouched and this pre-pass is skipped entirely.
++      const spawnCalls = isCustomEndpointEnabled()
++        ? functionCallsToProcess.filter(
++            functionCall =>
++              isSpawnAgentCall(functionCall) &&
++              !studioDeniedCallIds.has(functionCall.call_id)
++          )
++        : [];
++      const spawnHandledCallIds = new Set<string>();
++      const spawnFailureResults: Array<EditorFunctionCallResult> = [];
++      if (spawnCalls.length > 0) {
++        // Computed once per batch (W7), not once per spawn.
++        const gddContextNote = buildGddContextNote(project);
++        // Fan-out cap (W8): bound the live children one parent may have.
++        // Finished children stay in storage (they are history) and failed
++        // spawns create no child, so neither may consume the cap — otherwise
++        // the cap becomes a lifetime limit and later tasks can never delegate.
++        const existingChildCount = countLiveSubAgentsForParent(
++          aiRequest,
++          aiRequestsRef.current
++        );
++        let spawnedThisBatch = 0;
++        for (const spawnCall of spawnCalls) {
++          // The stand-alone view has no studio: sub-agents cannot be spawned.
++          if (!isStudioEnabled) {
++            spawnHandledCallIds.add(spawnCall.call_id);
++            const denial = {
++              status: 'finished',
++              call_id: spawnCall.call_id,
++              success: false,
++              output: { message: 'Sub-agents are not available in this view.' },
++            };
++            spawnFailureResults.push(denial);
++            addEditorFunctionCallResults(aiRequest.id, [denial]);
++            continue;
++          }
++          // Beyond the fan-out cap, refuse instead of spawning.
++          if (
++            existingChildCount + spawnedThisBatch >=
++            MAX_SUB_AGENTS_PER_PARENT
++          ) {
++            spawnHandledCallIds.add(spawnCall.call_id);
++            const capDenial = {
++              status: 'finished',
++              call_id: spawnCall.call_id,
++              success: false,
++              output: { message: 'Sub-agent limit reached for this request.' },
++            };
++            spawnFailureResults.push(capDenial);
++            addEditorFunctionCallResults(aiRequest.id, [capDenial]);
++            continue;
++          }
++          let spawnResult;
++          try {
++            spawnResult = await spawnSubAgent({
++              parentAiRequestId: aiRequest.id,
++              functionCall: spawnCall,
++              gameProjectJson: aiRequest.gameProjectJson || null,
++              projectSpecificExtensionsSummaryJson: null,
++              project,
++              gddContextNote,
++              onStamped: subAgentAiRequestId => {
++                // Stamp the call in place so the shared loop skips it from here
++                // on, then activate the child so AiRequestContext polls it and
++                // the editor processes its own function calls.
++                spawnCall.subAgentAiRequestId = subAgentAiRequestId;
++                activateSubAgent(
++                  subAgentAiRequestId,
++                  aiRequest.id,
++                  spawnCall.call_id
++                );
++              },
++            });
++          } catch (error) {
++            console.error('Error while spawning a studio sub-agent:', error);
++            spawnResult = { error: 'The sub-agent could not be started.' };
++          }
++
++          spawnHandledCallIds.add(spawnCall.call_id);
++          if (spawnResult.error) {
++            // Surface it as a failed call the model sees, rather than a crash.
++            const failure = {
++              status: 'finished',
++              call_id: spawnCall.call_id,
++              success: false,
++              output: { message: spawnResult.error },
++            };
++            spawnFailureResults.push(failure);
++            addEditorFunctionCallResults(aiRequest.id, [failure]);
++          } else {
++            // Only a created child consumes fan-out budget: a failed spawn
++            // created nothing, so counting it would ratchet the cap down on
++            // every transient failure until nothing can ever delegate.
++            spawnedThisBatch++;
++            // Link the call to its plan task so the chat renders it inside that
++            // task's row (ChatMessages' `functionCallItemsByTaskId` reads it) -
++            // the hosted server stamps this too; the BYOK path must as well.
++            const relatedTaskId = (spawnResult: any).relatedTaskId;
++            if (relatedTaskId) {
++              // Link the call to its plan task AND lift that task to
++              // in_progress in one write: a still-pending task does not render
++              // its linked calls (`OrchestratorPlan.TaskRow`), so without the
++              // status flip the spawn would be hidden instead of shown under
++              // its task. The hosted server stamps the same link.
++              spawnCall.taskId = relatedTaskId;
++              updateAiRequest(aiRequest.id, currentRequest => {
++                const base = currentRequest || aiRequest;
++                const plan = getLatestActivePlan(base);
++                if (!plan || !plan.tasks) return base;
++                const patchedTasks = patchPlanTaskAsDelegated(
++                  plan.tasks,
++                  relatedTaskId,
++                  spawnCall.call_id
++                );
++                const output = replacePlanMessage(base.output, patchedTasks);
++                return output ? { ...base, output } : base;
++              });
++            }
++          }
++        }
++      }
++      const callsForEditor = functionCallsToProcess.filter(
++        functionCall =>
++          !spawnHandledCallIds.has(functionCall.call_id) &&
++          !loopGuardHandledCallIds.has(functionCall.call_id) &&
++          !studioDeniedCallIds.has(functionCall.call_id)
++      );
++      // Mark only the editor calls as "working": a spawn (or a loop-guard hit)
++      // already has a terminal result, and a permanent "working" entry would
++      // make `hasUnfinishedResult` silently drop sibling sends.
+       addEditorFunctionCallResults(
+         aiRequest.id,
+-        functionCallsToProcess.map(functionCall => ({
++        callsForEditor.map(functionCall => ({
+           status: 'working',
+           call_id: functionCall.call_id,
+         }))
+       );
++      if (callsForEditor.length === 0) {
++        // Nothing left for the editor: surface the role denials and any spawn
++        // failures to the model (they are already recorded but not yet sent),
++        // then release the locks. Without this a denied-only batch loops.
++        const outcomeResults = [
++          ...studioDeniedResults,
++          ...loopGuardResults,
++          ...spawnFailureResults,
++        ];
++        if (outcomeResults.length > 0) {
++          await onSendEditorFunctionCallResults(
++            aiRequest.id,
++            outcomeResults,
++            {}
++          );
++        }
++        functionCallsToProcess.forEach(functionCall => {
++          inFlightFunctionCallIdsRef.current.delete(
++            `${aiRequest.id}:${functionCall.call_id}`
++          );
++        });
++        return;
++      }
+ 
+       // The "modified outside editor" callbacks each refresh the editor and can
+       // trigger an in-game editor hot reload. Firing them once per function
+@@ -669,7 +1053,7 @@
+           // Explorer sub-agent scripts are read-only: restrict their
+           // `run_script` to non-mutating functions (defense in depth).
+           runScriptReadOnly: isReadOnlyScriptContext,
+-          functionCalls: functionCallsToProcess.map(functionCall => ({
++          functionCalls: callsForEditor.map(functionCall => ({
+             name: functionCall.name,
+             arguments: functionCall.arguments,
+             call_id: functionCall.call_id,
+@@ -761,13 +1145,52 @@
+           return;
+         }
+ 
++        // Record outcomes for the loop guard's error-storm trip (a real success
++        // clears it; a failure advances it).
++        if (guard) {
++          results.forEach(result => {
++            if (result.status !== 'finished') return;
++            if (result.success) guard.recordSuccess();
++            else guard.recordError();
++          });
++        }
++
+         const newResults = addEditorFunctionCallResults(aiRequest.id, results);
+ 
+-        await onSendEditorFunctionCallResults(aiRequest.id, newResults, {
+-          createdSceneNames,
+-          createdExternalLayoutNames,
+-          createdProject,
+-        });
++        // A plan written by the plan tool is folded over the plan the request
++        // already has, matching tasks by id: the tool sends the tasks it knows
++        // about, so a field another writer set (the studio's `agentCallId` when
++        // it delegates a task) must survive. `result.output` is the object
++        // `EditorFunctionCallRunner` builds, so it is read as an object, never
++        // parsed.
++        const existingPlan = getLatestActivePlan(aiRequest);
++        const existingTasks = existingPlan ? existingPlan.tasks : null;
++        const mergedResults = newResults.map(result =>
++          // $FlowFixMe[incompatible-type]
++          mergePlanResultOutput(result, existingTasks)
++        );
++
++        // Send EVERY outcome recorded for this batch, not just the editor
++        // calls: a mixed batch (some allowed calls plus a role denial, a
++        // loop-guard warning, or a spawn failure) must surface all of them, or
++        // the model never learns those calls failed.
++        const sent = await onSendEditorFunctionCallResults(
++          aiRequest.id,
++          [
++            ...studioDeniedResults,
++            ...loopGuardResults,
++            ...spawnFailureResults,
++            ...mergedResults,
++          ],
++          {
++            createdSceneNames,
++            createdExternalLayoutNames,
++            createdProject,
++          }
++        );
++        if (!sent) {
++          console.error('[studio] function call results were not sent');
++        }
+       } finally {
+         // Flush the coalesced editor notifications for everything modified in
+         // this batch (one hot reload instead of one per call). In `finally` so
+@@ -787,7 +1210,9 @@
+         }
+ 
+         // Release the lock so these calls can be retried if needed
+-        // (e.g. after an error or a suspension).
++        // (e.g. after an error or a suspension). Release every call that was
++        // locked (including spawn/loop-guard handled ones), not just the ones
++        // sent to the editor.
+         functionCallsToProcess.forEach(functionCall => {
+           inFlightFunctionCallIdsRef.current.delete(
+             `${aiRequest.id}:${functionCall.call_id}`
+@@ -824,9 +1249,12 @@
+       getAssetStoreTagForNewObject,
+       generateEvents,
+       onSendEditorFunctionCallResults,
++      isStudioEnabled,
+       getIsAutoEditEnabled,
+       suspendAiRequest,
+       requestEditApproval,
++      activateSubAgent,
++      updateAiRequest,
+     ]
+   );
+ 
+@@ -870,9 +1298,50 @@
+     [onProcessFunctionCalls, allFunctionCallsToProcess]
+   );
+ 
++  // One write gate per hook instance: the studio's writes to a request go
++  // through it, so a write cannot land in the middle of another one for the
++  // same request (see `Studio/RequestWriteGate.js`).
++  const requestWriteQueueRef = React.useRef<Object | null>(null);
++  if (!requestWriteQueueRef.current) {
++    requestWriteQueueRef.current = createRequestWriteQueue();
++  }
++
++  /**
++   * Run `write` once the request is free, through the gate. The reason a write
++   * waited is logged, which is the whole point of naming the three block
++   * reasons rather than collapsing them to a boolean.
++   */
++  const enqueueRequestWrite = React.useCallback(
++    (aiRequestId: string, write: () => Promise<void>): Promise<void> => {
++      const queue = requestWriteQueueRef.current;
++      if (!queue) return write();
++      return queue.enqueue(aiRequestId, write, () => {
++        const block = getRequestWriteBlock({
++          aiRequestId,
++          request: (aiRequestsRef.current[aiRequestId]: any) || null,
++          isSending: isSendingAiRequest(aiRequestId),
++          inFlightCallIds: inFlightFunctionCallIdsRef.current,
++        });
++        if (block) {
++          console.info(
++            `[studio] deferred a write to ${aiRequestId}: ${block}.`
++          );
++          return true;
++        }
++        return false;
++      });
++    },
++    // `isSendingAiRequest` is read through the latest-render closure: the gate
++    // must see the current value at write time, not the one captured when the
++    // callback was created, so it is deliberately not a dependency.
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++    []
++  );
++
+   return {
+     onProcessFunctionCalls,
+     clearApprovedEditBatches,
++    enqueueRequestWrite,
+   };
+ };
+ 
+@@ -977,7 +1446,6 @@
+     editorFunctionCallResultsStorage,
+     isFetchingSuggestions,
+     setIsFetchingSuggestions,
+-    selectedAiRequestId,
+     setSelectedAiRequestId,
+     selectedAiRequest,
+   } = React.useContext(AiRequestContext);
+@@ -1036,20 +1504,19 @@
+         // Then ask for some.
+         if (
+           !selectedAiRequest ||
+-          (selectedAiRequest.mode !== 'agent' &&
+-            selectedAiRequest.mode !== 'orchestrator') ||
+-          isSendingAiRequest(selectedAiRequest.id) ||
+-          !selectedAiRequest.output ||
+-          selectedAiRequest.output.length === 0 ||
+-          selectedAiRequest.status !== 'ready' ||
+-          !profile ||
+-          isFetchingSuggestions
+-        )
++          !shouldFetchAiRequestSuggestions({
++            selectedAiRequest,
++            isSending: isSendingAiRequest(selectedAiRequest.id),
++            isFetchingSuggestions,
++            profile,
++            customEndpointEnabled: isCustomEndpointEnabled(),
++            hasProject: !!project,
++          })
++        ) {
+           return;
++        }
+ 
+-        // No suggestions until there is an actual project: before that, the AI
+-        // is still discussing the game idea or making a plan with the user.
+-        if (!project) return;
++        const activeUserId = profile ? profile.id : LOCAL_BYOK_USER_ID;
+ 
+         // Check if there are tools being run. If so, no suggestions at this time.
+         const hasFunctionsCallsToProcess =
+@@ -1139,7 +1606,7 @@
+           : null;
+         const preparedAiUserContent = await prepareAiUserContent({
+           getAuthorizationHeader,
+-          userId: profile.id,
++          userId: activeUserId,
+           simplifiedProjectJson,
+           projectSpecificExtensionsSummaryJson,
+           eventsJson: null,
+@@ -1153,7 +1620,7 @@
+           const aiRequestWorkingForSuggestions = await getAiRequestSuggestions(
+             getAuthorizationHeader,
+             {
+-              userId: profile.id,
++              userId: activeUserId,
+               aiRequestId: selectedAiRequest.id,
+               suggestionsType: isLastMessageFunctionCallOutputProjectInitialization
+                 ? 'list-with-explanations'
+@@ -1525,39 +1992,12 @@
+     [profile, setSelectedAiRequestId]
+   );
+ 
+-  React.useEffect(
+-    () => {
+-      // If a request ID is selected but not in storage, try to fetch it directly
+-      // This can happen when navigating to a request that hasn't been loaded yet (pagination)
+-      if (selectedAiRequestId && !selectedAiRequest && profile) {
+-        (async () => {
+-          try {
+-            const fetchedRequest = await getAiRequest(getAuthorizationHeader, {
+-              userId: profile.id,
+-              aiRequestId: selectedAiRequestId,
+-            });
+-            // Add it to the storage
+-            updateAiRequest(selectedAiRequestId, () => fetchedRequest);
+-          } catch (error) {
+-            console.error(
+-              'Error fetching AI request that is not in storage:',
+-              error
+-            );
+-            // If fetch fails, reset the selected request to avoid staying stuck
+-            setSelectedAiRequestId(null);
+-          }
+-        })();
+-      }
+-    },
+-    [
+-      selectedAiRequestId,
+-      selectedAiRequest,
+-      profile,
+-      getAuthorizationHeader,
+-      updateAiRequest,
+-      setSelectedAiRequestId,
+-    ]
+-  );
++  // Selection-load is intentionally NOT reimplemented here. AiRequestProvider's
++  // loadAiRequest effect is the single path: it manages loading/error state,
++  // suspends work-in-progress chats, and works offline for local-ai-*/custom
++  // endpoint ids. A second fetch from this hook raced that path when a profile
++  // was present (double getAiRequest) and cleared the selection on failure
++  // instead of keeping the Context's retry UI.
+ 
+   return {
+     isFetchingSuggestions,

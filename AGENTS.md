@@ -30,7 +30,7 @@
 ## Test commands
 
 ```bash
-npm test                                    # everything (must be 97/97+)
+npm test                                    # everything (must be 102/102+)
 npm run test:integration                     # tests/integration/ only
 node scripts/apply-patches.mjs --check      # seam gate
 ```

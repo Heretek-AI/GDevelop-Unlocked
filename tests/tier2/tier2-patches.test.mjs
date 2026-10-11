@@ -52,6 +52,22 @@ const GLUE = [
     files: ['newIDE/app/src/AiGeneration/AskAiEditorContainer.js'],
     noDelete: ['attachmentIds'],
   },
+  {
+    patch: '12-ai-request-utils.patch',
+    files: ['newIDE/app/src/AiGeneration/AiRequestUtils.js'],
+    includes: ['export const canStartAiRequestCreate', 'export const getUnselectedActiveRequests'],
+  },
+  {
+    patch: '13-ai-request-context.patch',
+    files: ['newIDE/app/src/AiGeneration/AiRequestContext.js'],
+    includes: ['customUpdateAiRequest', 'LOCAL_BYOK_USER_ID', 'parentHasOutputForCall'],
+  },
+  {
+    patch: '14-ai-utils.patch',
+    files: ['newIDE/app/src/AiGeneration/Utils.js'],
+    includes: ['enqueueRequestWrite', 'activateSubAgent: ('],
+    noDelete: ['onSaveProjectAsWithStorageProvider'],
+  },
 ];
 
 function run(cmd, args, cwd) {
@@ -89,6 +105,19 @@ describe('tier-2: glue patches apply cleanly and preserve upstream', () => {
         0,
         `${patch} deletes lines (upstream revert by construction):\n${deletions.slice(0, 5).join('\n')}`
       );
+    }
+  });
+
+  it('forward-ports carry their BYOK additions', () => {
+    for (const { patch, includes } of GLUE) {
+      if (!includes) continue;
+      const text = fs.readFileSync(path.join(ROOT, 'patches', patch), 'utf8');
+      for (const marker of includes) {
+        assert.ok(
+          text.includes(marker),
+          `${patch} missing BYOK marker: ${marker}`
+        );
+      }
     }
   });
 

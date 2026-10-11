@@ -1,0 +1,390 @@
+--- a/newIDE/app/src/AiGeneration/AiRequestContext.js
++++ b/newIDE/app/src/AiGeneration/AiRequestContext.js
+@@ -30,9 +30,17 @@
+   aiRequestShouldBeWatched,
+   aiRequestHasWorkInProgress,
+   aiRequestPollSawActivity,
++  canSendAiRequestForSession,
+   getUserRequestText,
+ } from './AiRequestUtils';
+ import { type EditApprovalRequest } from './Utils';
++import {
++  customUpdateAiRequest,
++  customSuspendAiRequest,
++  isCustomEndpointEnabled,
++  LOCAL_BYOK_USER_ID,
++} from '../AI/CustomAIClient';
++import { parentHasOutputForCall } from './Studio/FinalizeSubAgents';
+ 
+ type EditorFunctionCallResultsStorage = {|
+   getEditorFunctionCallResults: (
+@@ -246,8 +254,10 @@
+       gameId: ?string,
+       forceUri?: {| list: 'recents' | 'game', uri: string |},
+     |}) => {
+-      if (!profile) return;
+-
++      // Always call getAiRequestSummaries: offline/local sessions list the
++      // BYOK cache (userId LOCAL_BYOK), authenticated sessions merge that cache
++      // with the hosted page. An early return here hid local chats after
++      // logout whenever the custom endpoint was toggled off.
+       setIsLoading(true);
+       setError(null);
+ 
+@@ -256,13 +266,13 @@
+           forceUri && forceUri.list === 'game'
+             ? null
+             : getAiRequestSummaries(getAuthorizationHeader, {
+-                userId: profile.id,
++                userId: profile ? profile.id : LOCAL_BYOK_USER_ID,
+                 forceUri: forceUri ? forceUri.uri : null,
+                 filter,
+               }),
+           gameId && (!forceUri || forceUri.list === 'game')
+             ? getAiRequestSummaries(getAuthorizationHeader, {
+-                userId: profile.id,
++                userId: profile ? profile.id : LOCAL_BYOK_USER_ID,
+                 forceUri: forceUri ? forceUri.uri : null,
+                 filter,
+                 gameId,
+@@ -374,6 +384,11 @@
+         const newAiRequest = updateFn(
+           previousState.aiRequests[aiRequestId] || null
+         );
++        // Write a local (BYOK) request through to the cache so plan flips and
++        // the loop guard's error state are not reverted by the next cache fetch.
++        if (aiRequestId.startsWith('local-ai-')) {
++          customUpdateAiRequest(newAiRequest);
++        }
+         return {
+           ...previousState,
+           aiRequests: {
+@@ -396,11 +411,11 @@
+ 
+   const refreshAiRequest = React.useCallback(
+     async (aiRequestId: string): Promise<void> => {
+-      if (!profile) return;
++      if (!profile && !aiRequestId.startsWith('local-ai-')) return;
+ 
+       try {
+         const updatedAiRequest = await getAiRequest(getAuthorizationHeader, {
+-          userId: profile.id,
++          userId: profile ? profile.id : LOCAL_BYOK_USER_ID,
+           aiRequestId: aiRequestId,
+         });
+         updateAiRequest(updatedAiRequest.id, () => updatedAiRequest);
+@@ -424,7 +439,12 @@
+    */
+   const loadAiRequest = React.useCallback(
+     async (aiRequestId: string): Promise<void> => {
+-      if (!profile) return;
++      if (
++        !profile &&
++        !aiRequestId.startsWith('local-ai-') &&
++        !isCustomEndpointEnabled()
++      )
++        return;
+ 
+       setAiRequestLoadingStates(previousStates => ({
+         ...previousStates,
+@@ -432,13 +452,13 @@
+       }));
+       try {
+         let aiRequest = await getAiRequest(getAuthorizationHeader, {
+-          userId: profile.id,
++          userId: profile ? profile.id : LOCAL_BYOK_USER_ID,
+           aiRequestId,
+         });
+         if (aiRequestHasWorkInProgress(aiRequest, null)) {
+           try {
+             aiRequest = await apiSuspendAiRequest(getAuthorizationHeader, {
+-              userId: profile.id,
++              userId: profile ? profile.id : LOCAL_BYOK_USER_ID,
+               aiRequestId,
+             });
+           } catch (error) {
+@@ -495,9 +515,21 @@
+     []
+   );
+ 
++  // Local BYOK chats must be renameable/archivable/deletable without a logged-in
++  // profile — the hosted API is never involved for local-ai-* ids. Hosted IDs
++  // still need a profile: without one the mutation would send LOCAL_BYOK (or
++  // '') as userId to the Generation API. The custom-endpoint flag must not open
++  // that path (endpoint-on only makes local creates; it does not authorize
++  // hosted mutations for a logged-out session).
++  const canMutateAiRequest = React.useCallback(
++    (aiRequestId: string): boolean =>
++      !!profile || aiRequestId.startsWith('local-ai-'),
++    [profile]
++  );
++
+   const renameAiRequest = React.useCallback(
+     async (aiRequestId: string, title: string): Promise<void> => {
+-      if (!profile) return;
++      if (!canMutateAiRequest(aiRequestId)) return;
+       const newTitle = title.trim() || null;
+       const aiRequestSummary = state.aiRequestSummaries[aiRequestId];
+       const previousTitle =
+@@ -510,7 +542,7 @@
+       try {
+         await retryIfFailed({ times: 2 }, () =>
+           apiUpdateAiRequest(getAuthorizationHeader, {
+-            userId: profile.id,
++            userId: profile ? profile.id : LOCAL_BYOK_USER_ID,
+             aiRequestId,
+             title: newTitle,
+           })
+@@ -524,6 +556,7 @@
+       }
+     },
+     [
++      canMutateAiRequest,
+       getAuthorizationHeader,
+       profile,
+       state.aiRequestSummaries,
+@@ -533,7 +566,7 @@
+ 
+   const setAiRequestArchived = React.useCallback(
+     async (aiRequestId: string, archived: boolean): Promise<void> => {
+-      if (!profile) return;
++      if (!canMutateAiRequest(aiRequestId)) return;
+       const aiRequestSummary = state.aiRequestSummaries[aiRequestId];
+       const previousArchivedAt =
+         (aiRequestSummary && aiRequestSummary.archivedAt) || null;
+@@ -548,7 +581,7 @@
+       try {
+         const updatedAiRequest = await retryIfFailed({ times: 2 }, () =>
+           apiUpdateAiRequest(getAuthorizationHeader, {
+-            userId: profile.id,
++            userId: profile ? profile.id : LOCAL_BYOK_USER_ID,
+             aiRequestId,
+             archived,
+           })
+@@ -567,6 +600,7 @@
+       }
+     },
+     [
++      canMutateAiRequest,
+       getAuthorizationHeader,
+       profile,
+       state.aiRequestSummaries,
+@@ -576,7 +610,7 @@
+ 
+   const deleteAiRequest = React.useCallback(
+     async (aiRequestId: string): Promise<void> => {
+-      if (!profile) return;
++      if (!canMutateAiRequest(aiRequestId)) return;
+ 
+       // Optimistic update: the chat disappears right away.
+       setState(previousState => {
+@@ -594,7 +628,7 @@
+       try {
+         await retryIfFailed({ times: 2 }, () =>
+           apiDeleteAiRequest(getAuthorizationHeader, {
+-            userId: profile.id,
++            userId: profile ? profile.id : LOCAL_BYOK_USER_ID,
+             aiRequestId,
+           })
+         );
+@@ -606,18 +640,34 @@
+         fetchAiRequestSummaries();
+       }
+     },
+-    [getAuthorizationHeader, profile, fetchAiRequestSummaries]
++    [
++      canMutateAiRequest,
++      getAuthorizationHeader,
++      profile,
++      fetchAiRequestSummaries,
++    ]
+   );
+ 
++  // Keep the active filter without putting it in the logout effect deps —
++  // a filter change while logged out must not wipe loaded chats again.
++  const aiRequestSummariesFilterRef = React.useRef(aiRequestSummariesFilter);
++  aiRequestSummariesFilterRef.current = aiRequestSummariesFilter;
++
+   React.useEffect(
+     () => {
+-      // Reset AI requests when the user logs out.
++      // Reset AI requests when the user logs out, then reload whatever local
++      // BYOK chats remain in the client cache — wiping without a reload left
++      // the history empty even though localStorage still held the chats.
+       if (!profile) {
+         setState(emptyAiRequestsState);
+         setAiRequestLoadingStates({});
++        fetchAiRequestSummariesPages({
++          filter: aiRequestSummariesFilterRef.current,
++          gameId: null,
++        });
+       }
+     },
+-    [profile]
++    [profile, fetchAiRequestSummariesPages]
+   );
+ 
+   // Store send states in a ref so that isSendingAiRequest reads are
+@@ -902,15 +952,26 @@
+ ): AiRequest => {
+   const fetchedOutput = fetchedAiRequest.output || [];
+   const previousOutput = previousAiRequest && previousAiRequest.output;
++  // The first element is network-supplied and only the request's `id` key is
++  // validated on fetch (`ensureObjectHasProperty`), so `output[0]` may not be an
++  // object — reading `.messageId` off null/undefined threw out of the polling
++  // loop. A non-object first entry simply means "not an incremental slice".
++  const firstFetchedMessage = fetchedOutput[0];
+   const isIncrementalSlice =
+     !!outputFromMessageId &&
+     !!previousOutput &&
+-    fetchedOutput.length > 0 &&
+-    fetchedOutput[0].messageId === outputFromMessageId;
++    !!firstFetchedMessage &&
++    typeof firstFetchedMessage === 'object' &&
++    firstFetchedMessage.messageId === outputFromMessageId;
+   if (!isIncrementalSlice || !previousOutput) return fetchedAiRequest;
+ 
++  // The cached output is not shape-validated either, so the scan must skip
++  // holes: reading `.messageId` off a null entry threw out of the polling loop.
+   const spliceIndex = previousOutput.findIndex(
+-    message => message.messageId === outputFromMessageId
++    message =>
++      message &&
++      typeof message === 'object' &&
++      message.messageId === outputFromMessageId
+   );
+   if (spliceIndex === -1) return fetchedAiRequest;
+ 
+@@ -1167,11 +1228,12 @@
+       const parentRequest = aiRequests[subAgentInfo.parentAiRequestId];
+       if (!parentRequest) return;
+ 
+-      const parentOutput = parentRequest.output || [];
+-      const hasOutputForSubAgent = parentOutput.some(
+-        message =>
+-          message.type === 'function_call_output' &&
+-          message.call_id === subAgentInfo.callId
++      // The same resolution the studio runtime uses (tested, null-tolerant):
++      // the parent output is not shape-validated, so a hole must not throw in
++      // the watch loop.
++      const hasOutputForSubAgent = parentHasOutputForCall(
++        parentRequest,
++        subAgentInfo.callId
+       );
+ 
+       if (hasOutputForSubAgent) {
+@@ -1191,7 +1253,20 @@
+   // All the status-only checks for a given tick are batched
+   // into a single request instead of one request per entity.
+   const onWatch = async () => {
+-    if (!profile) return;
++    // Hosted watches need a profile; local-ai-* watches do not — offline
++    // studio must still retire finished sub-agents (otherwise hasActiveSubAgents
++    // stays true and the chat input never re-enables). Do not early-return on
++    // canSendAiRequestForSession here: it is per-request, and this loop may
++    // only have local-ai-* ids to address (isAddressable below filters hosted
++    // ids without a profile).
++    const activeUserId = profile ? profile.id : LOCAL_BYOK_USER_ID;
++    // Without a profile only local-ai-* ids are addressable (never the hosted API).
++    const isAddressable = (aiRequestId: string) =>
++      canSendAiRequestForSession(
++        profile,
++        isCustomEndpointEnabled(),
++        aiRequestId
++      );
+     const now = Date.now();
+ 
+     // Set to true whenever this tick observes activity (a status change or new
+@@ -1235,7 +1310,7 @@
+         (lastMessage && lastMessage.messageId) || undefined;
+       const fetchedAiRequest = await retryIfFailed({ times: 2 }, () =>
+         getAiRequest(getAuthorizationHeader, {
+-          userId: profile.id,
++          userId: activeUserId,
+           aiRequestId,
+           outputFromMessageId,
+         })
+@@ -1271,6 +1346,7 @@
+     const watchParent =
+       !!selectedAiRequestId &&
+       !!selectedAiRequest &&
++      isAddressable(selectedAiRequestId) &&
+       aiRequestShouldBeWatched(selectedAiRequest);
+     if (watchParent && selectedAiRequestId) {
+       if (now - lastFullFetchTimeRef.current >= fullFetchIntervalInMs) {
+@@ -1280,6 +1356,7 @@
+       }
+     }
+     for (const subAgentId of subAgentIds) {
++      if (!isAddressable(subAgentId)) continue;
+       const lastFullFetch =
+         subAgentLastFullFetchTimeRef.current[subAgentId] || 0;
+       if (now - lastFullFetch >= fullFetchIntervalInMs) {
+@@ -1294,11 +1371,15 @@
+     const statusOnlyPromise = (async () => {
+       if (statusOnlyIds.length === 0) return;
+       const statuses = await getAiRequestStatuses(getAuthorizationHeader, {
+-        userId: profile.id,
++        userId: activeUserId,
+         aiRequestIds: statusOnlyIds,
+       });
++      // `statuses` is a network response, so an entry may not be an object;
++      // destructuring it directly threw out of the whole watch tick.
+       const statusById: Map<string, GenerationStatus> = new Map(
+-        statuses.map(({ id, status }) => [id, status])
++        (Array.isArray(statuses) ? statuses : [])
++          .filter(entry => entry && typeof entry === 'object')
++          .map(({ id, status }) => [id, status])
+       );
+       await Promise.all(
+         statusOnlyIds.map(async aiRequestId => {
+@@ -1461,7 +1542,7 @@
+ 
+   const suspendAiRequest = React.useCallback(
+     async (aiRequestId: string): Promise<void> => {
+-      if (!profile) return;
++      // Dismiss any pending edit approval.
+       dismissEditApprovals();
+ 
+       // Optimistic update: mark as suspended locally immediately so any in-flight
+@@ -1475,14 +1556,32 @@
+         clearEditorFunctionCallResults(aiRequestId);
+       }
+ 
+-      const suspendedRequest = await apiSuspendAiRequest(
+-        getAuthorizationHeader,
+-        {
+-          userId: profile.id,
+-          aiRequestId,
+-        }
+-      );
+-      updateAiRequest(suspendedRequest.id, () => suspendedRequest);
++      // Local BYOK requests never touch the hosted API: suspending flips the
++      // local cache status (which also aborts their in-flight model turn).
++      if (aiRequestId.startsWith('local-ai-')) {
++        customSuspendAiRequest(aiRequestId);
++        return;
++      }
++
++      // Hosted suspend needs a profile. Logged-out sessions only own local-ai-*
++      // ids (handled above); an empty-string userId would still hit the
++      // Generation API. The optimistic 'suspended' state stands either way.
++      if (!profile) return;
++
++      try {
++        const suspendedRequest = await apiSuspendAiRequest(
++          getAuthorizationHeader,
++          {
++            userId: profile.id,
++            aiRequestId,
++          }
++        );
++        updateAiRequest(suspendedRequest.id, () => suspendedRequest);
++      } catch (error) {
++        // The optimistic 'suspended' state stands: never let a hosted-API
++        // failure abort the close/navigation the user asked for.
++        console.error('Failed to suspend the AI request:', error);
++      }
+     },
+     [
+       profile,

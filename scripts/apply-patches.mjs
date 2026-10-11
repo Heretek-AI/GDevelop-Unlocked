@@ -190,6 +190,37 @@ const MARKERS = [
     ],
     excludes: [],
   },
+  {
+    patch: '12-ai-request-utils.patch',
+    file: 'newIDE/app/src/AiGeneration/AiRequestUtils.js',
+    includes: [
+      'export const canStartAiRequestCreate',
+      'export const canSendAiRequestForSession',
+      'export const isFailedAiRequestStart',
+      'export const getUnselectedActiveRequests',
+      'export const shouldFetchAiRequestOnTabOpen',
+    ],
+    excludes: [],
+  },
+  {
+    patch: '13-ai-request-context.patch',
+    file: 'newIDE/app/src/AiGeneration/AiRequestContext.js',
+    includes: [
+      'customUpdateAiRequest',
+      'LOCAL_BYOK_USER_ID',
+      'parentHasOutputForCall',
+    ],
+    excludes: [],
+  },
+  {
+    patch: '14-ai-utils.patch',
+    file: 'newIDE/app/src/AiGeneration/Utils.js',
+    includes: [
+      'enqueueRequestWrite',
+      'activateSubAgent: (',
+    ],
+    excludes: [],
+  },
 ];
 
 function parseArgs(argv) {

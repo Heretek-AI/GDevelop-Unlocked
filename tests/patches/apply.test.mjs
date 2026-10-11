@@ -32,6 +32,11 @@ const TIER1_FILES = [
   'newIDE/app/src/AiGeneration/PrepareAiUserContent.js',
   'newIDE/app/src/AiGeneration/AiRequestChat/Utils.js',
   'newIDE/app/src/AiGeneration/AskAiEditorContainer.js',
+  // Tier-2 session/context glue (12/13).
+  'newIDE/app/src/AiGeneration/AiRequestUtils.js',
+  'newIDE/app/src/AiGeneration/AiRequestContext.js',
+  // Tier-2 process-function-calls glue (14).
+  'newIDE/app/src/AiGeneration/Utils.js',
 ];
 
 describe('patcher: Tier-1 hunks apply to pristine upstream', () => {

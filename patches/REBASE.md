@@ -57,6 +57,34 @@ Result 2026-10-11:
 - `PreferencesStorage.js` (fork-only new file) unchanged — still carried
   as a new-file hunk inside patch 08.
 
+## Follow-up gaps found by the first release build (patches 12–14)
+
+Webpack's compile caught what markers cannot: the rebased container
+imports session/studio helpers that live in three more fork-diverged
+files. Each was forward-ported the same way (merge-file, keep-both on
+conflict):
+
+- **12 `AiRequestUtils.js`**: no upstream drift (`base == cur`), so the
+  fork delta applied verbatim — 10 helpers (`canStartAiRequestCreate`,
+  `canSendAiRequestForSession`, `isFailedAiRequestStart`,
+  `getUnselectedActiveRequests`, `shouldFetchAiRequestOnTabOpen`, …).
+- **13 `AiRequestContext.js`**: upstream drift present, one conflict
+  (upstream extracted `dismissEditApprovals()`; fork dropped the profile
+  gate) → resolved to gateless `dismissEditApprovals()` call. Note:
+  upstream independently grew its own `activeSubAgents`/`activateSubAgent`
+  context fields after the fork diverged (convergent evolution) — patch
+  13 only adds the BYOK remainder (`customUpdateAiRequest`,
+  `LOCAL_BYOK_USER_ID` fallbacks, `parentHasOutputForCall`).
+- **14 `AiGeneration/Utils.js`**: upstream drift present, two conflicts
+  (upstream added `onSaveProjectAsWithStorageProvider`; fork added
+  `activateSubAgent`/`updateAiRequest`/`isSendingAiRequest` to
+  `useProcessFunctionCalls` args + type, and `enqueueRequestWrite` to its
+  return) → all four props kept on both sites.
+- Permanent gate: `tests/integration/patched-import-closure.test.mjs`
+  resolves every relative import across the patched surface
+  (negative-controlled: removing patch 12 reproduces the exact webpack
+  failure).
+
 ## Rebase again when
 
 Upstream touches any of the five merged files (weekly seam check), or the
