@@ -6,9 +6,9 @@ depth, three layers:
 
 | Layer | File | Mechanism |
 |---|---|---|
-| Preload seed | `preload-unlock.cjs` | `webPreferences.preload`, runs before the bundle: seeds `window.__HERETEK__`, wraps `fetch` + `XHR` for exactly two GET endpoints |
-| Window wrap | `heretek-hook.cjs` | Wraps `electron.BrowserWindow` (loader runs before the main.js:6 destructure), `browser-window-created` + `did-finish-load` fallback for pop-outs/preview |
-| Network fallback | `heretek-hook.cjs` | `webRequest.onBeforeRequest` redirects usage GETs to `data:` URLs |
+| Preload seed | `preload-unlock.cjs` | `webPreferences.preload` **where the export is wrappable**; runs before the bundle: seeds `window.__HERETEK__`, wraps `fetch` + `XHR` for exactly two GET endpoints |
+| Window fallback (usual production path) | `heretek-hook.cjs` | `browser-window-created` + `did-finish-load` `executeJavaScript` of the composed fallback source — same wrappers, applied before React hydrates. Production Electron's `BrowserWindow` export is non-configurable, so this (not the preload) carries the unlock there |
+| Network backstop | `heretek-hook.cjs` | `webRequest.onBeforeRequest` redirects usage GETs to `data:` URLs (proven live: stock v5.6.283 + launcher only → `HERETEK_SMOKE ok:true`) |
 
 ## Why not `Module._load`?
 

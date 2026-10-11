@@ -1,0 +1,127 @@
+name: e2e
+
+# End-to-end: real release artifact + real Chromium + (mock|real) BYOK endpoint.
+# Unit suite (`npm test`) stays fast and offline; this workflow proves the
+# hook holds on a stock build and the BYOK contract speaks OpenAI.
+#
+# Design notes:
+# - The release asar holds BUNDLED renderer code, so source patches can't
+#   apply there. tier1-smoke uses the launcher-only path instead: extract
+#   -> scripts/inject-launcher.mjs (loader line + 3 .cjs, anchor-verified)
+#   -> repack -> launch with --heretek-smoke under xvfb.
+# - UPSTREAM_RELEASE must stay close to UPSTREAM_BASELINE.json; if the
+#   loader anchor moves, injection fails loudly (by design).
+# - byok-mock is deterministic (committed mock); byok-ollama runs weekly
+#   + on demand against a real server with a tiny model.
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 7 * * 1' # weekly, after the seam drift check
+  workflow_dispatch:
+
+env:
+  UPSTREAM_RELEASE: v5.6.283
+
+jobs:
+  tier1-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install xvfb + unzip
+        run: sudo apt-get update && sudo apt-get install -y xvfb unzip
+      - name: Download pinned upstream release
+        run: |
+          gh release download "$UPSTREAM_RELEASE" --repo 4ian/GDevelop \
+            --pattern "GDevelop-5-${UPSTREAM_RELEASE#v}-linux.zip" --dir /tmp/e2e
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Extract asar + inject launcher
+        run: |
+          mkdir -p /tmp/e2e/app && unzip -q /tmp/e2e/*.zip -d /tmp/e2e/app
+          npx --yes @electron/asar extract /tmp/e2e/app/resources/app.asar /tmp/e2e/asar
+          node scripts/inject-launcher.mjs --appdir /tmp/e2e/asar
+          npx --yes @electron/asar pack /tmp/e2e/asar /tmp/e2e/app/resources/app.asar
+      - name: Launch under xvfb with --heretek-smoke
+        run: |
+          export HOME=/tmp/e2e/home && mkdir -p "$HOME"
+          xvfb-run -a /tmp/e2e/app/gdevelop --no-sandbox --disable-gpu \
+            --disable-dev-shm-usage --user-data-dir=/tmp/e2e/profile \
+            --heretek-smoke > /tmp/e2e/smoke.log 2>&1
+          echo "exit=$?"
+      - name: Assert smoke verdict
+        run: |
+          grep -a "HERETEK_SMOKE:" /tmp/e2e/smoke.log | tail -1 > /tmp/e2e/verdict.json
+          node -e "
+            const fs = require('fs');
+            const line = fs.readFileSync('/tmp/e2e/verdict.json', 'utf8');
+            const verdict = JSON.parse(line.slice(line.indexOf('HERETEK_SMOKE:') + 14));
+            console.log(JSON.stringify(verdict, null, 2));
+            if (!verdict.ok) { console.error('SMOKE FAILED:', verdict.failures); process.exit(1); }
+            console.log('tier-1 smoke passed on stock release + launcher only.');
+          "
+      - name: Upload smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier1-smoke-log
+          path: /tmp/e2e/smoke.log
+
+  byok-mock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Start committed mock provider
+        run: |
+          node packages/ai-studio/dev-harness/mock-ai-provider.js > /tmp/e2e-mock.log 2>&1 &
+          echo $! > /tmp/e2e-mock.pid
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:11435/v1/models && break
+            sleep 1
+          done
+      - name: Assert OpenAI-compatible contract
+        run: |
+          curl -sf http://127.0.0.1:11435/v1/models | grep -q mock-city-builder
+          curl -sf -X POST http://127.0.0.1:11435/v1/chat/completions \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"mock-city-builder","messages":[{"role":"user","content":"build a tiny platformer"}]}' \
+            | grep -q '"choices"'
+          curl -sf -N -X POST http://127.0.0.1:11435/v1/chat/completions \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"mock-city-builder","stream":true,"messages":[{"role":"user","content":"hi"}]}' \
+            | grep -q '^data: '
+          echo "mock provider contract holds (models + non-stream + SSE)."
+      - name: Stop mock provider
+        if: always()
+        run: kill "$(cat /tmp/e2e-mock.pid)" || true
+
+  byok-ollama:
+    # Real server, tiny model. Nightly + manual only — too heavy for PRs.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install + serve Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve > /tmp/e2e-ollama.log 2>&1 &
+          sleep 10
+      - name: Pull tiny model + assert chat contract
+        run: |
+          ollama pull qwen2:0.5b
+          curl -sf http://127.0.0.1:11434/v1/models | grep -q qwen2
+          curl -sf -X POST http://127.0.0.1:11434/v1/chat/completions \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"qwen2:0.5b","messages":[{"role":"user","content":"reply with the word OK"}],"max_tokens":16}' \
+            | grep -q '"choices"'
+          echo "real Ollama contract holds (this is what CustomAIClient speaks)."
