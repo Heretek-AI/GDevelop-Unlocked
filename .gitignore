@@ -1,0 +1,8 @@
+# Local-only upstream/fork checkouts (multi-GB baselines for seam +
+# provenance tests). CI clones the pinned commits (see UPSTREAM_BASELINE.json
+# and packages/ai-studio/MANIFEST.json); never commit these.
+review/
+node_modules/
+coverage/
+*.log
+.DS_Store

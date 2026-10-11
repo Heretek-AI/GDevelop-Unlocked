@@ -1,0 +1,100 @@
+{
+  "donor": "/home/john/Projects/GDevelop-Unlocked/review/GDevelop-Heretek",
+  "files": {
+    "AI/CustomAIClient.js": {
+      "donor": "newIDE/app/src/AI/CustomAIClient.js",
+      "bytes": 208828,
+      "sha256": "2dd976b936908115d08374851121a077d2b2b6c314a029a4bc52ab7125f51723"
+    },
+    "AI/CustomAIClient.spec.js": {
+      "donor": "newIDE/app/src/AI/CustomAIClient.spec.js",
+      "bytes": 257794,
+      "sha256": "0152072739b6590f004e886b8a5787cd769a529f044f14e48ca7e78ecc2a560a"
+    },
+    "AiGeneration/Studio/EditApprovalLabel.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/EditApprovalLabel.js",
+      "bytes": 1308,
+      "sha256": "a924efc714123ab45e7d649d581b4d54557e6452fc0df3bcf8ad387c27c9f194"
+    },
+    "AiGeneration/Studio/FinalizeSubAgents.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/FinalizeSubAgents.js",
+      "bytes": 9111,
+      "sha256": "708de36210d000af56e795280eaa5dd450e32cedb4a54b7b031353a6cc4a679f"
+    },
+    "AiGeneration/Studio/LoopGuard.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/LoopGuard.js",
+      "bytes": 9401,
+      "sha256": "0ad4c6f5d6312a38f56e0385b8408adec72634c95d7252a3ff193af1e667101e"
+    },
+    "AiGeneration/Studio/NudgePolicy.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/NudgePolicy.js",
+      "bytes": 3821,
+      "sha256": "c13a8af43b3b3d23ccb2dff2bc3438755d502090fd99f2bad1061d86f8d3c925"
+    },
+    "AiGeneration/Studio/PlanStore.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/PlanStore.js",
+      "bytes": 13166,
+      "sha256": "3218ec230b6786d9105fd2854b3389b20b6c68a0889ccc6134f533106b1a3be6"
+    },
+    "AiGeneration/Studio/RequestWriteGate.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/RequestWriteGate.js",
+      "bytes": 5904,
+      "sha256": "bcd78ad8d0a22ca58ea413b2d1bbdbd07814184a0e28726dcfe8d466707c5064"
+    },
+    "AiGeneration/Studio/Roles.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/Roles.js",
+      "bytes": 12493,
+      "sha256": "dac71987229c63fcea55fabd049b43ab48beff68cb19813de9d1c77090c6798f"
+    },
+    "AiGeneration/Studio/RoleToolPolicy.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/RoleToolPolicy.js",
+      "bytes": 2097,
+      "sha256": "66a7d577f12fccaa1b23d89bc7ba02c9bca07058358cc53d3ecfe50d604ef1b8"
+    },
+    "AiGeneration/Studio/SafeTruncation.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/SafeTruncation.js",
+      "bytes": 2743,
+      "sha256": "24e4e11fb5ee360374cd3bfa092fd01755b99228c34df74547473336d4a799ce"
+    },
+    "AiGeneration/Studio/SpawnSubAgents.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/SpawnSubAgents.js",
+      "bytes": 9089,
+      "sha256": "ffc0658c57b027d20cc50c88bc350ac013369c3fb09ed366ff8736a7aa78d2ae"
+    },
+    "AiGeneration/Studio/UseStudioNudge.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/UseStudioNudge.js",
+      "bytes": 5824,
+      "sha256": "12df5f3f54a52e3c2c72646e6825360206eec0521dd6f15d73cd39660b21e0d2"
+    },
+    "AiGeneration/Studio/UseStudioRuntime.js": {
+      "donor": "newIDE/app/src/AiGeneration/Studio/UseStudioRuntime.js",
+      "bytes": 11187,
+      "sha256": "ecc51b28d00baf1ccd7d38d542e4a9237cd145cd863586c6fae6e587d03564c3"
+    },
+    "dev-harness/mock-ai-provider.js": {
+      "donor": "scripts/dev/mock-ai-provider.js",
+      "bytes": 9858,
+      "sha256": "8840bec1a98385c106deaa78aaec5b18fdf98b54a944fc9413ee5916679150ca"
+    },
+    "dev-harness/mock-script.example.json": {
+      "donor": "scripts/dev/mock-script.example.json",
+      "bytes": 887,
+      "sha256": "45c2915841b0a6c0f17db7a297a39ca1dfb8b889d74f018f87d1815cadf17c26"
+    },
+    "dev-harness/mock-script-multi.json": {
+      "donor": "scripts/dev/mock-script-multi.json",
+      "bytes": 1314,
+      "sha256": "c94da74ac1251e07ae7a4576ea7354a1ef9f76a9294cca4bf473c0807d5ed824"
+    },
+    "dev-harness/mock-script-specialists.json": {
+      "donor": "scripts/dev/mock-script-specialists.json",
+      "bytes": 960,
+      "sha256": "31fe97f889935e92bfb3af5056e2579105fb7b48b325fd3dfcc9a5847b4ee6b7"
+    },
+    "dev-harness/mock-child-scripts.example.json": {
+      "donor": "scripts/dev/mock-child-scripts.example.json",
+      "bytes": 532,
+      "sha256": "8f785710966f26a7923793f47a785b18d8e8d326bb381f78682a7eb50ac6bdd7"
+    }
+  }
+}

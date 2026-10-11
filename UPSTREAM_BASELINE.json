@@ -1,0 +1,15 @@
+{
+  "comment": "Pinned upstream shape the Phase 1 seam tests were written against. CI re-runs the suite against this commit on schedule; any red suite means a patch hunk or hook target moved.",
+  "donorBaselineCommit": "b9109cfbaaaf19c31b5af4d315317fb67d8903c3",
+  "verifiedAtUpstreamCommit": "8301cdcaa4",
+  "verifiedAt": "2026-10-11",
+  "seams": {
+    "Usage.hasValidSubscriptionPlan": "newIDE/app/src/Utils/GDevelopServices/Usage.js:~605",
+    "LocalPreviewLauncher.%16": "newIDE/app/src/ExportAndShare/LocalExporters/LocalPreviewLauncher/index.js:~441",
+    "SubscriptionChecker": "newIDE/app/src/Profile/Subscription/SubscriptionChecker.js:~66",
+    "DebuggerEditorContainer": "newIDE/app/src/MainFrame/EditorContainers/DebuggerEditorContainer.js:~135",
+    "LoadingScreenEditor": "newIDE/app/src/ProjectManager/LoadingScreenEditor.js:~106,~162",
+    "electron.main.webPreferences": "newIDE/electron-app/app/main.js:~174",
+    "electron.UrlLoader": "newIDE/electron-app/app/Utils/UrlLoader.js"
+  }
+}

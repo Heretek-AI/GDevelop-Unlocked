@@ -1,0 +1,19 @@
+--- a/newIDE/electron-app/app/main.js
++++ b/newIDE/electron-app/app/main.js
+@@ -1,3 +1,16 @@
++// GDevelop-Unlocked (Phase 3, issue #3): install the Tier-1 runtime hook
++// before any module destructures `electron.BrowserWindow` (main.js:6,
++// PreviewWindow.js:1-6). Re-applied by scripts/apply-patches.mjs, which
++// also syncs launcher/*.cjs next to this file. Updates drop the hook:
++// see launcher/README.md ("auto-updater pin").
++try {
++  require('./heretek-hook.cjs').installPreloadHook();
++} catch (error) {
++  console.error(
++    '[heretek] hook install failed (Tier-1 runtime fallback only):',
++    error
++  );
++}
+ const electron = require('electron');
+ const path = require('path');
+ const fs = require('fs');

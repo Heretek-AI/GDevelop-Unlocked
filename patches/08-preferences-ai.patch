@@ -1,0 +1,760 @@
+--- a/newIDE/app/src/MainFrame/Preferences/PreferencesDialog.js
++++ b/newIDE/app/src/MainFrame/Preferences/PreferencesDialog.js
+@@ -21,7 +21,7 @@
+ } from './PreferencesContext';
+ import Text from '../../UI/Text';
+ import EmptyMessage from '../../UI/EmptyMessage';
+-import { ColumnStackLayout } from '../../UI/Layout';
++import { ColumnStackLayout, LineStackLayout } from '../../UI/Layout';
+ import { Tabs } from '../../UI/Tabs';
+ import SettingsRow, { useSettingsRowControlIds } from '../../UI/SettingsRow';
+ import VerticalTabButton from '../../UI/VerticalTabButton';
+@@ -41,6 +41,9 @@
+ import { type MessageDescriptor } from '../../Utils/i18n/MessageDescriptor.flow';
+ import { useResponsiveWindowSize } from '../../UI/Responsive/ResponsiveWindowMeasurer';
+ import { adaptAcceleratorString } from '../../UI/AcceleratorString';
++import RaisedButton from '../../UI/RaisedButton';
++import TextField from '../../UI/TextField';
++import { testConnection, MAX_TIMEOUT_MS } from '../../AI/CustomAIClient';
+ import {
+   getElectronAccelerator,
+   getShortcutDisplayName,
+@@ -91,7 +94,7 @@
+   | 'extensions'
+   | 'developer';
+ 
+-export type PreferencesTabName = 'preferences' | 'shortcuts';
++export type PreferencesTabName = 'preferences' | 'ai' | 'shortcuts';
+ 
+ type GetIconFunction = ({
+   color: string,
+@@ -339,6 +342,7 @@
+ type Props = {|
+   i18n: I18n,
+   onClose: (options: {| languageDidChange: boolean |}) => void,
++  onOpenQuickCustomizationDialog: () => void,
+   /** The tab displayed when the dialog opens. Defaults to the preferences. */
+   initialTab?: PreferencesTabName,
+   /** The preferences section displayed when the dialog opens. Defaults to the general one. */
+@@ -378,6 +382,7 @@
+ const PreferencesDialog = ({
+   i18n,
+   onClose,
++  onOpenQuickCustomizationDialog,
+   initialTab,
+   initialSection,
+   isDesktop = !!electron,
+@@ -444,8 +449,26 @@
+     setDisableNpmScriptConfirmation,
+     setUseBackgroundSerializerForSaving,
+     setShowJsTypeError,
++    setAiCustomEndpointEnabled,
++    setAiCustomBaseUrl,
++    setAiCustomApiKey,
++    setAiCustomModel,
++    setAiCustomFallbackModel,
++    setAiCustomTemperature,
++    setAiCustomTimeoutMs,
++    setAiCustomStreaming,
+   } = React.useContext(PreferencesContext);
+ 
++  const [
++    isTestingAiConnection,
++    setIsTestingAiConnection,
++  ] = React.useState<boolean>(false);
++  const [aiTestResult, setAiTestResult] = React.useState<null | {|
++    success: boolean,
++    message: string,
++    models?: Array<string>,
++  |}>(null);
++
+   const initialUse3DEditor = React.useRef<boolean>(values.use3DEditor);
+ 
+   const isSearching = searchText.trim() !== '';
+@@ -554,7 +577,7 @@
+       if (sectionNameAtTop && sectionNameAtTop !== currentSection) {
+         setCurrentSection((sectionNameAtTop: any));
+       }
+-    } else {
++    } else if (currentTab === 'shortcuts') {
+       const areaNameAtTop = getEntryKeyAtTop(
+         shortcutAreas.map(area => area.name),
+         getShortcutAreaElementId
+@@ -563,6 +586,7 @@
+         setCurrentShortcutArea((areaNameAtTop: any));
+       }
+     }
++    // The 'ai' tab has a single section with no scroll-spy: nothing to update.
+   };
+ 
+   const hasCustomizedShortcuts = Object.keys(values.userShortcutMap).some(
+@@ -1237,6 +1261,16 @@
+                   setUseGDJSDevelopmentWatcher
+                 ),
+             },
++            {
++              id: 'quick-customization',
++              label: i18n._(t`Quick customization`),
++              renderControl: () => (
++                <FlatButton
++                  onClick={onOpenQuickCustomizationDialog}
++                  label={<Trans>Open</Trans>}
++                />
++              ),
++            },
+           ],
+         };
+       case 'contributor':
+@@ -1323,6 +1357,152 @@
+    * sections list on the left (not displayed on mobile) scrolls to a section.
+    */
+   const renderCurrentTabContent = () => {
++    if (currentTab === 'ai') {
++      return (
++        <ColumnStackLayout noMargin>
++          <Text size="block-title">
++            <Trans>Custom AI Provider (BYOK)</Trans>
++          </Text>
++          <Text size="body" color="secondary">
++            <Trans>
++              Connect GDevelop to a local AI server (such as Ollama, llama.cpp,
++              LM Studio, LocalAI) or any OpenAI-compatible API endpoint.
++            </Trans>
++          </Text>
++          <CompactToggleField
++            checked={values.aiCustomEndpointEnabled}
++            onCheck={setAiCustomEndpointEnabled}
++            label={<Trans>Enable Custom / Local AI Endpoint (BYOK)</Trans>}
++          />
++          <LineStackLayout alignItems="center" noMargin>
++            <Text size="body-small" color="secondary">
++              <Trans>Local server presets:</Trans>
++            </Text>
++            {[
++              { label: 'Ollama', baseUrl: 'http://localhost:11434/v1' },
++              { label: 'LM Studio', baseUrl: 'http://localhost:1234/v1' },
++              { label: 'llama.cpp', baseUrl: 'http://localhost:8080/v1' },
++            ].map(preset => (
++              <RaisedButton
++                key={preset.label}
++                label={preset.label}
++                onClick={() => setAiCustomBaseUrl(preset.baseUrl)}
++              />
++            ))}
++          </LineStackLayout>
++          <TextField
++            floatingLabelText={<Trans>Base URL</Trans>}
++            helperMarkdownText={i18n._(
++              t`Examples: \`http://localhost:11434/v1\` (Ollama), \`http://localhost:8080/v1\` (llama.cpp), \`http://localhost:1234/v1\` (LM Studio), \`https://api.openai.com/v1\`, \`https://openrouter.ai/api/v1\``
++            )}
++            fullWidth
++            value={values.aiCustomBaseUrl}
++            onChange={(e, value) => setAiCustomBaseUrl(value)}
++          />
++          <TextField
++            type="password"
++            floatingLabelText={<Trans>API Key</Trans>}
++            helperMarkdownText={i18n._(
++              t`Bearer token for authentication. Leave empty for local servers (Ollama / llama.cpp).`
++            )}
++            fullWidth
++            value={values.aiCustomApiKey}
++            onChange={(e, value) => setAiCustomApiKey(value)}
++          />
++          <TextField
++            floatingLabelText={<Trans>Model Identifier</Trans>}
++            helperMarkdownText={i18n._(
++              t`Examples: \`qwen2.5-coder\`, \`gpt-4o\`, \`llama3.2\`, \`deepseek-chat\`, \`claude-3-5-sonnet\`, \`openrouter/poolside/laguna-s-2.1:free\``
++            )}
++            fullWidth
++            value={values.aiCustomModel}
++            onChange={(e, value) => setAiCustomModel(value)}
++          />
++          <TextField
++            floatingLabelText={<Trans>Fallback model (optional)</Trans>}
++            helperMarkdownText={i18n._(
++              t`Used once if the primary model keeps returning a transient provider error (502/503/429). Leave empty to disable.`
++            )}
++            fullWidth
++            value={values.aiCustomFallbackModel}
++            onChange={(e, value) => setAiCustomFallbackModel(value)}
++          />
++          <TextField
++            type="number"
++            floatingLabelText={<Trans>Temperature (0.0 to 1.0)</Trans>}
++            value={values.aiCustomTemperature}
++            onChange={(e, value) => {
++              const parsed = parseFloat(value);
++              if (Number.isNaN(parsed)) {
++                setAiCustomTemperature(0.7);
++              } else {
++                setAiCustomTemperature(Math.max(0.0, Math.min(1.0, parsed)));
++              }
++            }}
++          />
++          <CompactToggleField
++            checked={!!values.aiCustomStreaming}
++            onCheck={setAiCustomStreaming}
++            label={
++              <Trans>
++                Stream responses (experimental — falls back automatically if the
++                endpoint does not support it)
++              </Trans>
++            }
++          />
++          <TextField
++            type="number"
++            floatingLabelText={<Trans>Request timeout in milliseconds</Trans>}
++            helperMarkdownText={i18n._(
++              t`Time before a request to the AI endpoint is aborted. Increase this for slow local models on large contexts. Default: 120000.`
++            )}
++            fullWidth
++            value={values.aiCustomTimeoutMs}
++            onChange={(e, value) => {
++              const parsed = parseInt(value, 10);
++              if (Number.isNaN(parsed) || parsed <= 0) {
++                setAiCustomTimeoutMs(120000);
++              } else {
++                setAiCustomTimeoutMs(Math.min(parsed, MAX_TIMEOUT_MS));
++              }
++            }}
++          />
++          <LineStackLayout alignItems="center">
++            <RaisedButton
++              label={<Trans>Test Connection</Trans>}
++              primary
++              disabled={isTestingAiConnection}
++              onClick={async () => {
++                setIsTestingAiConnection(true);
++                setAiTestResult(null);
++                try {
++                  const res = await testConnection({
++                    enabled: true,
++                    baseUrl: values.aiCustomBaseUrl,
++                    apiKey: values.aiCustomApiKey,
++                    model: values.aiCustomModel,
++                    temperature: values.aiCustomTemperature,
++                  });
++                  setAiTestResult(res);
++                } catch (err) {
++                  setAiTestResult({
++                    success: false,
++                    message: err.message || 'Connection test failed',
++                  });
++                } finally {
++                  setIsTestingAiConnection(false);
++                }
++              }}
++            />
++          </LineStackLayout>
++          {aiTestResult && (
++            <AlertMessage kind={aiTestResult.success ? 'info' : 'error'}>
++              {aiTestResult.message}
++            </AlertMessage>
++          )}
++        </ColumnStackLayout>
++      );
++    }
+     if (currentTab === 'shortcuts') {
+       return (
+         <ColumnStackLayout noMargin expand>
+@@ -1424,7 +1604,9 @@
+     setCurrentTab(tabName);
+     // Start from the top of the new tab.
+     if (tabName === 'preferences') setCurrentSection(visibleSections[0].name);
+-    else setCurrentShortcutArea(shortcutAreas[0].name);
++    else if (tabName === 'shortcuts')
++      setCurrentShortcutArea(shortcutAreas[0].name);
++    // The 'ai' tab has no sub-navigation (no sections list on the left).
+     pendingScrollElementIdRef.current = '';
+   };
+ 
+@@ -1442,6 +1624,7 @@
+ 
+   // The entries of the sections list, on the left of the content: the
+   // preferences sections or the shortcut areas, depending on the current tab.
++  // The 'ai' tab is a single page with no sub-sections, so it has no entries.
+   const sectionListEntries =
+     currentTab === 'preferences'
+       ? visibleSections.map(section => ({
+@@ -1451,13 +1634,15 @@
+           isActive: !isSearching && highlightedSectionName === section.name,
+           onSelect: () => onSelectSection(section.name),
+         }))
+-      : shortcutAreas.map(area => ({
++      : currentTab === 'shortcuts'
++      ? shortcutAreas.map(area => ({
+           key: area.name,
+           label: i18n._(commandAreas[area.name]),
+           getIcon: area.getIcon,
+           isActive: !isSearching && currentShortcutArea === area.name,
+           onSelect: () => onSelectShortcutArea(area.name),
+-        }));
++        }))
++      : [];
+ 
+   return (
+     <Dialog
+@@ -1512,6 +1697,7 @@
+             onChange={onSelectTab}
+             options={[
+               { value: 'preferences', label: <Trans>Preferences</Trans> },
++              { value: 'ai', label: <Trans>AI Settings</Trans> },
+               { value: 'shortcuts', label: <Trans>Keyboard Shortcuts</Trans> },
+             ]}
+           />
+@@ -1527,7 +1713,7 @@
+       }
+     >
+       <div style={styles.body}>
+-        {!isMobile && (
++        {!isMobile && sectionListEntries.length > 0 && (
+           <>
+             <div style={styles.sectionsColumn}>
+               <ColumnStackLayout noMargin>
+--- a/newIDE/app/src/MainFrame/Preferences/PreferencesContext.js
++++ b/newIDE/app/src/MainFrame/Preferences/PreferencesContext.js
+@@ -218,7 +218,6 @@
+   hasProjectOpened: boolean,
+   userShortcutMap: ShortcutMap,
+   newObjectDialogDefaultTab: 'asset-store' | 'new-object',
+-  newEffectDialogDefaultTab: 'asset-store' | 'from-scratch',
+   shareDialogDefaultTab: 'invite' | 'publish',
+   isMenuBarHiddenInPreview: boolean,
+   isAlwaysOnTopInPreview: boolean,
+@@ -259,6 +258,14 @@
+   disableNpmScriptConfirmation: boolean,
+   showJsTypeError: boolean,
+   canonicalEventSerialization: boolean,
++  aiCustomEndpointEnabled: boolean,
++  aiCustomBaseUrl: string,
++  aiCustomApiKey: string,
++  aiCustomModel: string,
++  aiCustomFallbackModel: string,
++  aiCustomTemperature: number,
++  aiCustomTimeoutMs: number,
++  aiCustomStreaming: boolean,
+ |};
+ 
+ /**
+@@ -323,8 +330,6 @@
+   setShortcutForCommand: (commandName: CommandName, shortcut: string) => void,
+   getNewObjectDialogDefaultTab: () => 'asset-store' | 'new-object',
+   setNewObjectDialogDefaultTab: ('asset-store' | 'new-object') => void,
+-  getNewEffectDialogDefaultTab: () => 'asset-store' | 'from-scratch',
+-  setNewEffectDialogDefaultTab: ('asset-store' | 'from-scratch') => void,
+   getShareDialogDefaultTab: () => 'invite' | 'publish',
+   setShareDialogDefaultTab: ('invite' | 'publish') => void,
+   getIsMenuBarHiddenInPreview: () => boolean,
+@@ -394,6 +399,14 @@
+   setUseBackgroundSerializerForSaving: (enabled: boolean) => void,
+   setShowJsTypeError: (enabled: boolean) => void,
+   setCanonicalEventSerialization: (enabled: boolean) => void,
++  setAiCustomEndpointEnabled: (enabled: boolean) => void,
++  setAiCustomBaseUrl: (baseUrl: string) => void,
++  setAiCustomApiKey: (apiKey: string) => void,
++  setAiCustomModel: (model: string) => void,
++  setAiCustomFallbackModel: (model: string) => void,
++  setAiCustomTemperature: (temperature: number) => void,
++  setAiCustomTimeoutMs: (timeoutMs: number) => void,
++  setAiCustomStreaming: (streaming: boolean) => void,
+ |};
+ 
+ export const initialPreferences = {
+@@ -428,8 +441,6 @@
+     newObjectDialogDefaultTab: ((electron
+       ? 'new-object'
+       : 'asset-store'): string),
+-    // Show the effects of the store first, as they are not otherwise visible.
+-    newEffectDialogDefaultTab: 'asset-store',
+     shareDialogDefaultTab: 'publish',
+     isMenuBarHiddenInPreview: true,
+     isAlwaysOnTopInPreview: false,
+@@ -465,6 +476,14 @@
+     disableNpmScriptConfirmation: false,
+     showJsTypeError: false,
+     canonicalEventSerialization: false,
++    aiCustomEndpointEnabled: false,
++    aiCustomBaseUrl: 'http://localhost:11434/v1',
++    aiCustomApiKey: '',
++    aiCustomModel: 'qwen2.5-coder',
++    aiCustomFallbackModel: '',
++    aiCustomTemperature: 0.7,
++    aiCustomTimeoutMs: 120000,
++    aiCustomStreaming: false,
+   },
+   setMultipleValues: () => {},
+   setLanguage: () => {},
+@@ -507,8 +526,6 @@
+   setShortcutForCommand: (commandName: CommandName, shortcut: string) => {},
+   getNewObjectDialogDefaultTab: (): string => 'asset-store',
+   setNewObjectDialogDefaultTab: () => {},
+-  getNewEffectDialogDefaultTab: (): string => 'asset-store',
+-  setNewEffectDialogDefaultTab: () => {},
+   getShareDialogDefaultTab: (): string => 'invite',
+   setShareDialogDefaultTab: () => {},
+   getIsMenuBarHiddenInPreview: (): boolean => true,
+@@ -563,6 +580,14 @@
+   setUseBackgroundSerializerForSaving: (enabled: boolean) => {},
+   setShowJsTypeError: (enabled: boolean) => {},
+   setCanonicalEventSerialization: (enabled: boolean) => {},
++  setAiCustomEndpointEnabled: (enabled: boolean) => {},
++  setAiCustomBaseUrl: (baseUrl: string) => {},
++  setAiCustomApiKey: (apiKey: string) => {},
++  setAiCustomModel: (model: string) => {},
++  setAiCustomFallbackModel: (model: string) => {},
++  setAiCustomTemperature: (temperature: number) => {},
++  setAiCustomTimeoutMs: (timeoutMs: number) => {},
++  setAiCustomStreaming: (streaming: boolean) => {},
+ };
+ 
+ const PreferencesContext: React.Context<Preferences> = React.createContext<Preferences>(
+--- a/newIDE/app/src/MainFrame/Preferences/PreferencesProvider.js
++++ b/newIDE/app/src/MainFrame/Preferences/PreferencesProvider.js
+@@ -34,6 +34,11 @@
+   CHECK_APP_UPDATES_TIMEOUT,
+   PERIODIC_APP_UPDATES_TIMEOUT,
+ } from '../../Utils/GlobalFetchTimeouts';
++import { setCustomEndpointConfig } from '../../AI/CustomAIClient';
++import {
++  getPersistablePreferences,
++  mergeStoredPreferencesWithDefaults,
++} from './PreferencesStorage';
+ const electron = optionalRequire('electron');
+ const ipcRenderer = electron ? electron.ipcRenderer : null;
+ 
+@@ -51,35 +56,13 @@
+     const persistedState = localStorage.getItem(localStorageItem);
+     if (!persistedState) return null;
+ 
+-    const values = JSON.parse(persistedState);
+-
+-    // "Migrate" non existing properties to their default values
+-    // (useful when upgrading the preferences to a new version where
+-    // a new preference was added).
+-    for (const key in initialPreferences.values) {
+-      if (
+-        initialPreferences.values.hasOwnProperty(key) &&
+-        typeof values[key] === 'undefined'
+-      ) {
+-        // $FlowFixMe[invalid-computed-prop]
+-        values[key] = initialPreferences.values[key];
+-      }
+-    }
+-
+-    // Migrate renamed themes.
+-    if (values.themeName === 'GDevelop default') {
+-      values.themeName = 'GDevelop default Light';
+-    } else if (values.themeName === 'Dark') {
+-      values.themeName = 'Blue Dark';
+-    }
+-
+-    if (typeof values.showDeprecatedInstructionWarning === 'boolean') {
+-      values.showDeprecatedInstructionWarning = values.showDeprecatedInstructionWarning
+-        ? 'icon'
+-        : 'no';
+-    }
+-
+-    return values;
++    // Backfill missing keys with defaults and apply the stored-value
++    // migrations. The merge lives in PreferencesStorage so its contract
++    // (backfill undefined only; never clobber a present value) is unit-tested.
++    return mergeStoredPreferencesWithDefaults(
++      JSON.parse(persistedState),
++      initialPreferences.values
++    );
+   } catch (e) {
+     return null;
+   }
+@@ -118,7 +101,6 @@
+   lastLaunchedVersion: void,
+   newFeaturesAcknowledgements: {},
+   newObjectDialogDefaultTab: any,
+-  newEffectDialogDefaultTab: string,
+   newProjectsDefaultFolder: any,
+   newProjectsDefaultStorageProviderName: string,
+   openDiagnosticReportAutomatically: boolean,
+@@ -277,14 +259,6 @@
+       this
+     ): any),
+     // $FlowFixMe[method-unbinding]
+-    getNewEffectDialogDefaultTab: (this._getNewEffectDialogDefaultTab.bind(
+-      this
+-    ): any),
+-    // $FlowFixMe[method-unbinding]
+-    setNewEffectDialogDefaultTab: (this._setNewEffectDialogDefaultTab.bind(
+-      this
+-    ): any),
+-    // $FlowFixMe[method-unbinding]
+     getShareDialogDefaultTab: (this._getShareDialogDefaultTab.bind(this): any),
+     // $FlowFixMe[method-unbinding]
+     setShareDialogDefaultTab: (this._setShareDialogDefaultTab.bind(this): any),
+@@ -436,9 +410,39 @@
+     setCanonicalEventSerialization: (this._setCanonicalEventSerialization.bind(
+       this
+     ): any),
++    // $FlowFixMe[method-unbinding]
++    setAiCustomEndpointEnabled: (this._setAiCustomEndpointEnabled.bind(
++      this
++    ): any),
++    // $FlowFixMe[method-unbinding]
++    setAiCustomBaseUrl: (this._setAiCustomBaseUrl.bind(this): any),
++    // $FlowFixMe[method-unbinding]
++    setAiCustomApiKey: (this._setAiCustomApiKey.bind(this): any),
++    // $FlowFixMe[method-unbinding]
++    setAiCustomModel: (this._setAiCustomModel.bind(this): any),
++    // $FlowFixMe[method-unbinding]
++    setAiCustomFallbackModel: (this._setAiCustomFallbackModel.bind(this): any),
++    // $FlowFixMe[method-unbinding]
++    setAiCustomTemperature: (this._setAiCustomTemperature.bind(this): any),
++    // $FlowFixMe[method-unbinding]
++    setAiCustomTimeoutMs: (this._setAiCustomTimeoutMs.bind(this): any),
++    // $FlowFixMe[method-unbinding]
++    setAiCustomStreaming: (this._setAiCustomStreaming.bind(this): any),
+   };
+ 
+   componentDidMount() {
++    // Sync custom AI config on mount
++    setCustomEndpointConfig({
++      enabled: this.state.values.aiCustomEndpointEnabled,
++      baseUrl: this.state.values.aiCustomBaseUrl,
++      apiKey: this.state.values.aiCustomApiKey,
++      model: this.state.values.aiCustomModel,
++      fallbackModel: this.state.values.aiCustomFallbackModel,
++      temperature: this.state.values.aiCustomTemperature,
++      timeoutMs: this.state.values.aiCustomTimeoutMs,
++      streaming: this.state.values.aiCustomStreaming,
++    });
++
+     this._periodicUpdateCheckTimeout = setTimeout(
+       () => this._checkUpdates(),
+       CHECK_APP_UPDATES_TIMEOUT
+@@ -980,9 +984,11 @@
+ 
+   _persistValuesToLocalStorage(preferences: Preferences): any {
+     try {
++      // The API key is never persisted in cleartext (see
++      // `getPersistablePreferences`).
+       localStorage.setItem(
+         localStorageItem,
+-        JSON.stringify(preferences.values)
++        JSON.stringify(getPersistablePreferences(preferences.values))
+       );
+     } catch (e) {
+       console.warn('Unable to persist preferences', e);
+@@ -1160,21 +1166,6 @@
+     );
+   }
+ 
+-  _getNewEffectDialogDefaultTab(): any {
+-    return this.state.values.newEffectDialogDefaultTab;
+-  }
+-
+-  _setNewEffectDialogDefaultTab(
+-    newEffectDialogDefaultTab: 'asset-store' | 'from-scratch'
+-  ) {
+-    this.setState(
+-      state => ({
+-        values: { ...state.values, newEffectDialogDefaultTab },
+-      }),
+-      () => this._persistValuesToLocalStorage(this.state)
+-    );
+-  }
+-
+   _getShareDialogDefaultTab(): any {
+     return this.state.values.shareDialogDefaultTab;
+   }
+@@ -1508,6 +1499,125 @@
+     );
+   }
+ 
++  _setAiCustomEndpointEnabled(newValue: boolean) {
++    this.setState(
++      state => ({
++        values: {
++          ...state.values,
++          aiCustomEndpointEnabled: newValue,
++        },
++      }),
++      () => {
++        this._persistValuesToLocalStorage(this.state);
++        setCustomEndpointConfig({ enabled: newValue });
++      }
++    );
++  }
++
++  _setAiCustomBaseUrl(newValue: string) {
++    this.setState(
++      state => ({
++        values: {
++          ...state.values,
++          aiCustomBaseUrl: newValue,
++        },
++      }),
++      () => {
++        this._persistValuesToLocalStorage(this.state);
++        setCustomEndpointConfig({ baseUrl: newValue });
++      }
++    );
++  }
++
++  _setAiCustomApiKey(newValue: string) {
++    this.setState(
++      state => ({
++        values: {
++          ...state.values,
++          aiCustomApiKey: newValue,
++        },
++      }),
++      () => {
++        setCustomEndpointConfig({ apiKey: newValue });
++      }
++    );
++  }
++
++  _setAiCustomModel(newValue: string) {
++    this.setState(
++      state => ({
++        values: {
++          ...state.values,
++          aiCustomModel: newValue,
++        },
++      }),
++      () => {
++        this._persistValuesToLocalStorage(this.state);
++        setCustomEndpointConfig({ model: newValue });
++      }
++    );
++  }
++
++  _setAiCustomFallbackModel(newValue: string) {
++    this.setState(
++      state => ({
++        values: {
++          ...state.values,
++          aiCustomFallbackModel: newValue,
++        },
++      }),
++      () => {
++        this._persistValuesToLocalStorage(this.state);
++        setCustomEndpointConfig({ fallbackModel: newValue });
++      }
++    );
++  }
++
++  _setAiCustomTemperature(newValue: number) {
++    this.setState(
++      state => ({
++        values: {
++          ...state.values,
++          aiCustomTemperature: newValue,
++        },
++      }),
++      () => {
++        this._persistValuesToLocalStorage(this.state);
++        setCustomEndpointConfig({ temperature: newValue });
++      }
++    );
++  }
++
++  _setAiCustomStreaming(newValue: boolean) {
++    this.setState(
++      state => ({
++        values: {
++          ...state.values,
++          aiCustomStreaming: newValue,
++        },
++      }),
++      () => {
++        this._persistValuesToLocalStorage(this.state);
++        setCustomEndpointConfig({ streaming: newValue });
++      }
++    );
++  }
++
++  _setAiCustomTimeoutMs(newValue: number) {
++    this.setState(
++      state => ({
++        values: {
++          ...state.values,
++          aiCustomTimeoutMs: newValue,
++        },
++      }),
++      () => {
++        this._persistValuesToLocalStorage(this.state);
++        setCustomEndpointConfig({ timeoutMs: newValue });
++      }
++    );
++  }
++
+   render(): any {
+     return (
+       <PreferencesContext.Provider value={this.state}>
+--- a/newIDE/app/src/MainFrame/Preferences/PreferencesStorage.js
++++ b/newIDE/app/src/MainFrame/Preferences/PreferencesStorage.js
+@@ -0,0 +1,65 @@
++// @flow
++
++/**
++ * The preferences that may be written to localStorage.
++ *
++ * `aiCustomApiKey` is deliberately omitted: the user's API key must never be
++ * persisted in cleartext (it is kept in memory only, for the session). Both the
++ * preferences payload and the custom-AI config payload drop it — see
++ * `CustomAIClient.setCustomEndpointConfig`, which does the same for its own
++ * store.
++ *
++ * A pure module so the exclusion can be unit-tested: `PreferencesProvider.js`
++ * imports React, Electron and the GDevelop core, which a spec cannot load.
++ */
++export const getPersistablePreferences = (values: Object): Object => {
++  const { aiCustomApiKey, ...persistableValues } = values;
++  return persistableValues;
++};
++
++/**
++ * Merge preferences read from localStorage with the defaults, mirroring the
++ * provider's upgrade path: a key that is *missing* (undefined) is backfilled
++ * from the defaults; a key that is present is kept as-is, even if falsy or
++ * wrong-typed (the app validates at the point of use, not here). Also applies
++ * the two stored-value migrations (renamed themes, the deprecated-warning
++ * tri-state). Returns null when the stored value is not a plain object, which
++ * the caller treats as "no stored preferences".
++ *
++ * Extracted from `PreferencesProvider.loadPreferencesFromLocalStorage` so the
++ * backfill contract can be unit-tested (that file imports React, Electron and
++ * the GDevelop core).
++ */
++export const mergeStoredPreferencesWithDefaults = (
++  storedValues: any,
++  defaults: Object
++): ?Object => {
++  if (
++    !storedValues ||
++    typeof storedValues !== 'object' ||
++    Array.isArray(storedValues)
++  ) {
++    return null;
++  }
++  const values = { ...storedValues };
++  for (const key in defaults) {
++    if (
++      Object.prototype.hasOwnProperty.call(defaults, key) &&
++      typeof values[key] === 'undefined'
++    ) {
++      values[key] = defaults[key];
++    }
++  }
++  // Migrate renamed themes.
++  if (values.themeName === 'GDevelop default') {
++    values.themeName = 'GDevelop default Light';
++  } else if (values.themeName === 'Dark') {
++    values.themeName = 'Blue Dark';
++  }
++  if (typeof values.showDeprecatedInstructionWarning === 'boolean') {
++    values.showDeprecatedInstructionWarning = values.showDeprecatedInstructionWarning
++      ? 'icon'
++      : 'no';
++  }
++  return values;
++};

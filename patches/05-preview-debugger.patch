@@ -1,0 +1,46 @@
+--- a/newIDE/app/src/ExportAndShare/LocalExporters/LocalPreviewLauncher/index.js
++++ b/newIDE/app/src/ExportAndShare/LocalExporters/LocalPreviewLauncher/index.js
+@@ -437,12 +437,6 @@
+         });
+       }
+       if (!previewOptions.isForInGameEdition) {
+-        if (
+-          this.state.hotReloadsCount % 16 === 0 &&
+-          this._hotReloadSubscriptionChecker
+-        ) {
+-          this._hotReloadSubscriptionChecker.checkUserHasSubscription();
+-        }
+         this.setState(state => ({
+           hotReloadsCount: state.hotReloadsCount + 1,
+         }));
+@@ -487,9 +481,7 @@
+   }
+ 
+   _checkSubscriptionForNetworkPreview = (): any => {
+-    if (!this._networkPreviewSubscriptionChecker) return true;
+-
+-    return this._networkPreviewSubscriptionChecker.checkUserHasSubscription();
++    return true;
+   };
+ 
+   render(): any {
+--- a/newIDE/app/src/MainFrame/EditorContainers/DebuggerEditorContainer.js
++++ b/newIDE/app/src/MainFrame/EditorContainers/DebuggerEditorContainer.js
+@@ -133,16 +133,7 @@
+   }
+ 
+   _checkUserHasSubscription() {
+-    if (
+-      this._subscriptionChecker &&
+-      this.props.isActive &&
+-      !this.state.subscriptionChecked
+-    ) {
+-      this._subscriptionChecker.checkUserHasSubscription();
+-      this.setState({
+-        subscriptionChecked: true,
+-      });
+-    }
++    // Unlocked in GDevelop-Heretek
+   }
+ 
+   render(): any {

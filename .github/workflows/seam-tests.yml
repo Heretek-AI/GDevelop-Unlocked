@@ -1,0 +1,31 @@
+name: seam-tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1' # weekly drift check against upstream baseline
+
+jobs:
+  seams:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Baselines are gitignored locally (multi-GB); CI clones the pins:
+      # upstream verified-at commit + fork donor baseline (provenance tests).
+      - name: Clone pinned upstream baseline
+        run: |
+          git clone --no-checkout https://github.com/4ian/GDevelop review/GDevelop
+          git -C review/GDevelop checkout 8301cdcaa48b496f48a28a6e3a56fa833eaeddff
+      - name: Clone fork donor baseline
+        run: |
+          git clone --no-checkout https://github.com/Heretek-AI/GDevelop-Heretek review/GDevelop-Heretek
+          git -C review/GDevelop-Heretek checkout b9109cfbaaaf19c31b5af4d315317fb67d8903c3
+      - name: Run full suite (seams + patcher + launcher + tier-2 + web)
+        run: npm test
+      - name: Patcher gate (seams + patch inventory)
+        run: node scripts/apply-patches.mjs --check
