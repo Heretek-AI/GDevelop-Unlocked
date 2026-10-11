@@ -6,6 +6,7 @@ on:
   pull_request:
   schedule:
     - cron: '0 6 * * 1' # weekly drift check against upstream baseline
+  workflow_dispatch: # lets the suite be run on a work branch before a PR
 
 jobs:
   seams:
@@ -14,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22 # package.json engines: >=22
       # Baselines are gitignored locally (multi-GB); CI clones the pin:
       # upstream verified-at commit. This repo is fork-independent: no
       # donor checkout exists anywhere in test or build paths.

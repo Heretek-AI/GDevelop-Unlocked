@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Install xvfb + unzip
         run: sudo apt-get update && sudo apt-get install -y xvfb unzip
       - name: Download pinned upstream release
@@ -44,27 +44,19 @@ jobs:
       - name: Extract asar + inject launcher
         run: |
           mkdir -p /tmp/e2e/app && unzip -q /tmp/e2e/*.zip -d /tmp/e2e/app
-          npx --yes @electron/asar extract /tmp/e2e/app/resources/app.asar /tmp/e2e/asar
+          npx --yes @electron/asar@4.3.1 extract /tmp/e2e/app/resources/app.asar /tmp/e2e/asar
           node scripts/inject-launcher.mjs --appdir /tmp/e2e/asar
-          npx --yes @electron/asar pack /tmp/e2e/asar /tmp/e2e/app/resources/app.asar
+          npx --yes @electron/asar@4.3.1 pack /tmp/e2e/asar /tmp/e2e/app/resources/app.asar
       - name: Launch under xvfb with --heretek-smoke
         run: |
           export HOME=/tmp/e2e/home && mkdir -p "$HOME"
           xvfb-run -a /tmp/e2e/app/gdevelop --no-sandbox --disable-gpu \
             --disable-dev-shm-usage --user-data-dir=/tmp/e2e/profile \
-            --heretek-smoke > /tmp/e2e/smoke.log 2>&1
-          echo "exit=$?"
-      - name: Assert smoke verdict
-        run: |
-          grep -a "HERETEK_SMOKE:" /tmp/e2e/smoke.log | tail -1 > /tmp/e2e/verdict.json
-          node -e "
-            const fs = require('fs');
-            const line = fs.readFileSync('/tmp/e2e/verdict.json', 'utf8');
-            const verdict = JSON.parse(line.slice(line.indexOf('HERETEK_SMOKE:') + 14));
-            console.log(JSON.stringify(verdict, null, 2));
-            if (!verdict.ok) { console.error('SMOKE FAILED:', verdict.failures); process.exit(1); }
-            console.log('tier-1 smoke passed on stock release + launcher only.');
-          "
+            --heretek-smoke > /tmp/e2e/smoke.log 2>&1 || true
+      # The verdict line decides, not the app's exit code: a crash before the
+      # probe leaves no verdict and fails here too.
+      - name: Assert smoke verdict (stock release + launcher only)
+        run: node scripts/assert-smoke-verdict.mjs /tmp/e2e/smoke.log
       - name: Upload smoke log
         if: always()
         uses: actions/upload-artifact@v4
@@ -79,12 +71,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Start committed mock provider
         run: |
           node packages/ai-studio/dev-harness/mock-ai-provider.js > /tmp/e2e-mock.log 2>&1 &
           echo $! > /tmp/e2e-mock.pid
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf http://127.0.0.1:11435/v1/models && break
             sleep 1
           done
@@ -109,16 +101,26 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Official image pinned by digest instead of piping an install script
+    # from the network into a shell.
+    services:
+      ollama:
+        image: ollama/ollama:0.34.3@sha256:7ab595e4ead391f6818c7215297781282babe0701f6d9a9f8862ac591360a58b
+        ports:
+          - 11434:11434
     steps:
       - uses: actions/checkout@v4
-      - name: Install + serve Ollama
+      - name: Wait for the Ollama server
         run: |
-          curl -fsSL https://ollama.com/install.sh | sh
-          ollama serve > /tmp/e2e-ollama.log 2>&1 &
-          sleep 10
+          for _ in $(seq 1 60); do
+            curl -sf http://127.0.0.1:11434/api/version && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:11434/api/version
       - name: Pull tiny model + assert chat contract
         run: |
-          ollama pull qwen2:0.5b
+          curl -sf --max-time 900 http://127.0.0.1:11434/api/pull \
+            -d '{"model":"qwen2:0.5b","stream":false}' | grep -q '"status":"success"'
           curl -sf http://127.0.0.1:11434/v1/models | grep -q qwen2
           curl -sf -X POST http://127.0.0.1:11434/v1/chat/completions \
             -H 'Content-Type: application/json' \
