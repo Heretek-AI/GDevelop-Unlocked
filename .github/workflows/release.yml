@@ -3,13 +3,17 @@ name: release
 # Full-installer release: patched source -> built app -> smoke-gated publish.
 #
 # Manual dispatch per upstream release. Required human pre-steps before each
-# run (see patches/REBASE.md): merge-file pass on 07/08/11 against the new
-# tag, green suite, bumped UPSTREAM_BASELINE.json. The driver itself fails
-# loudly on drift, so a stale patch can never silently ship.
+# run (see patches/REBASE.md): merge-file pass on the curated forward-ports
+# against the new tag, green suite, bumped UPSTREAM_BASELINE.json. The driver
+# itself fails loudly on drift, so a stale patch can never silently ship.
 #
-# Linux x64 first (proven toolchain); Win/Mac runners are a follow-up.
+# One job per OS; each one applies, builds, proves the update feed is gone
+# from the BUILT output, and smokes the built app before uploading. Nothing
+# is published unless `publish` is true AND every selected OS job is green.
+# `platforms` lets a single OS be rebuilt (or released first) on its own.
+#
 # Unsigned portable builds (GD_PORTABLE_BUILD) until signing is set up —
-# disclosed on the release page, not hidden.
+# disclosed on the release page, not hidden. See docs/release-signing.md.
 on:
   workflow_dispatch:
     inputs:
@@ -18,15 +22,35 @@ on:
         required: true
         default: '8301cdcaa48b496f48a28a6e3a56fa833eaeddff'
       publish:
-        description: 'Publish GitHub release after green smoke (true) or upload artifact only (false)'
+        description: 'Publish GitHub release after green smoke (true) or upload artifacts only (false)'
         required: false
         default: 'false'
+      platforms:
+        description: 'Which OS jobs to run'
+        required: false
+        type: choice
+        default: all
+        options: [all, linux, windows, macos]
+
+permissions:
+  contents: read
 
 env:
   UPSTREAM_REF: ${{ inputs.upstream_ref }}
+  # Unsigned portable build: upstream's own switch (electron-builder-config.js)
+  # disables macOS signing + notarization and Windows Authenticode.
+  GD_PORTABLE_BUILD: 'true'
+  # Never fall back to "latest master" libGD.js: the C++ core must be the
+  # build of the exact commit the IDE is built from, or the job fails.
+  REQUIRES_EXACT_LIBGD_JS_VERSION: 'true'
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   build-linux:
+    if: inputs.platforms == 'all' || inputs.platforms == 'linux'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -39,69 +63,247 @@ jobs:
       - name: Clone upstream source at ref
         run: |
           git clone https://github.com/4ian/GDevelop upstream
-          git -C upstream checkout "$UPSTREAM_REF"
+          # A named branch, not a detached HEAD: upstream's libGD.js import
+          # keys the prebuilt download on `<branch>/commit/<sha>`.
+          git -C upstream checkout -B master "$UPSTREAM_REF"
       - name: Apply all patches + Tier-2 overlay (fails loudly on drift)
-        run: |
-          node unlocked/scripts/apply-patches.mjs --target "$GITHUB_WORKSPACE/upstream"
+        run: node unlocked/scripts/apply-patches.mjs --target upstream
         env:
           UPSTREAM_DIR: ${{ github.workspace }}/upstream
       - name: Neuter auto-updater feed (no update phone-home, ever)
+        run: node unlocked/scripts/strip-updater-feed.mjs upstream
+      - name: Install renderer deps + build web app
         run: |
-          node unlocked/scripts/strip-updater-feed.mjs "$GITHUB_WORKSPACE/upstream"
-          grep -q 'publish:' upstream/newIDE/electron-app/electron-builder-config.js \
-            && { echo 'UPDATE FEED SURVIVED — refusing to build'; exit 1; } \
-            || echo 'update feed absent, building.'
+          cd upstream/newIDE/app
+          npm install
+          npm run build
+      - name: Install electron deps
+        run: |
+          cd upstream/newIDE/electron-app
+          npm install
+      - name: Build Linux zip (unsigned portable)
+        run: |
+          cd upstream/newIDE/electron-app
+          npm run build -- --linux zip --x64 --publish=never
+      - name: Built output carries no update feed
+        run: |
+          FEED="$(find upstream/newIDE/electron-app/dist -name 'app-update.yml')"
+          if [ -n "$FEED" ]; then
+            echo "UPDATE FEED SURVIVED IN BUILD OUTPUT — refusing to upload:"; echo "$FEED"; exit 1
+          fi
+          echo 'no app-update.yml in build output.'
+      - name: Smoke the built app (hook must hold on the real bundle)
+        timeout-minutes: 8
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb unzip
+          BUILD_OUT="$(find upstream/newIDE/electron-app/dist -maxdepth 1 -name '*.zip' | head -n 1)"
+          echo "smoking $BUILD_OUT"
+          REL="$RUNNER_TEMP/rel"
+          mkdir -p "$REL/app" "$REL/home" && unzip -q "$BUILD_OUT" -d "$REL/app"
+          BIN="$(find "$REL/app" -maxdepth 2 -type f -name 'gdevelop*' | head -n 1)"
+          HOME="$REL/home" xvfb-run -a "$BIN" --no-sandbox --disable-gpu \
+            --disable-dev-shm-usage --user-data-dir="$REL/profile" \
+            --heretek-smoke > "$REL/smoke.log" 2>&1 || true
+          node unlocked/scripts/assert-smoke-verdict.mjs "$REL/smoke.log"
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdevelop-unlocked-linux-x64-${{ inputs.upstream_ref }}
+          path: upstream/newIDE/electron-app/dist/*.zip
+          if-no-files-found: error
+
+  build-windows:
+    if: inputs.platforms == 'all' || inputs.platforms == 'windows'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      # Patches are LF; a CRLF checkout of either tree breaks every hunk.
+      - name: Keep line endings as committed
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+      - uses: actions/checkout@v4
+        with:
+          path: unlocked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Clone upstream source at ref
+        run: |
+          git clone https://github.com/4ian/GDevelop upstream
+          git -C upstream checkout -B master "$UPSTREAM_REF"
+      - name: Apply all patches + Tier-2 overlay (fails loudly on drift)
+        run: node unlocked/scripts/apply-patches.mjs --target upstream
+        env:
+          UPSTREAM_DIR: ${{ github.workspace }}/upstream
+      - name: Neuter auto-updater feed (no update phone-home, ever)
+        run: node unlocked/scripts/strip-updater-feed.mjs upstream
+      # Mirrors upstream's own Windows CI (.circleci/config.yml build-windows):
+      # setuptools restores distutils for a native dependency, and the lock
+      # files are dropped because npm install hangs on them there.
+      - name: Install renderer deps + build web app
+        run: |
+          pip install setuptools
+          cd upstream/newIDE/app
+          rm -f package-lock.json
+          npm install
+          npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
+      - name: Install electron deps
+        run: |
+          cd upstream/newIDE/electron-app
+          rm -f package-lock.json
+          npm install
+      - name: Build Windows nsis + zip (unsigned portable)
+        run: |
+          cd upstream/newIDE/electron-app
+          npm run build -- --win nsis zip --x64 --publish=never
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
+      - name: Built output carries no update feed
+        run: |
+          FEED="$(find upstream/newIDE/electron-app/dist -name 'app-update.yml')"
+          if [ -n "$FEED" ]; then
+            echo "UPDATE FEED SURVIVED IN BUILD OUTPUT — refusing to upload:"; echo "$FEED"; exit 1
+          fi
+          echo 'no app-update.yml in build output.'
+      - name: Smoke the built app (hook must hold on the real bundle)
+        timeout-minutes: 8
+        run: |
+          REL="$RUNNER_TEMP/rel"
+          mkdir -p "$REL"
+          BIN="$(find upstream/newIDE/electron-app/dist/win-unpacked -maxdepth 1 -type f -name '*.exe' | head -n 1)"
+          echo "smoking $BIN"
+          "$BIN" --no-sandbox --disable-gpu --user-data-dir="$REL/profile" \
+            --heretek-smoke > "$REL/smoke.log" 2>&1 || true
+          node unlocked/scripts/assert-smoke-verdict.mjs "$REL/smoke.log"
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdevelop-unlocked-windows-x64-${{ inputs.upstream_ref }}
+          path: |
+            upstream/newIDE/electron-app/dist/*.exe
+            upstream/newIDE/electron-app/dist/*.zip
+          if-no-files-found: error
+
+  build-macos:
+    if: inputs.platforms == 'all' || inputs.platforms == 'macos'
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: unlocked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Clone upstream source at ref
+        run: |
+          git clone https://github.com/4ian/GDevelop upstream
+          git -C upstream checkout -B master "$UPSTREAM_REF"
+      - name: Apply all patches + Tier-2 overlay (fails loudly on drift)
+        run: node unlocked/scripts/apply-patches.mjs --target upstream
+        env:
+          UPSTREAM_DIR: ${{ github.workspace }}/upstream
+      - name: Neuter auto-updater feed (no update phone-home, ever)
+        run: node unlocked/scripts/strip-updater-feed.mjs upstream
       - name: Install renderer deps + build web app
         run: |
           cd upstream/newIDE/app
           npm install
           npm run build
         env:
-          GD_PORTABLE_BUILD: 'true'
+          NODE_OPTIONS: --max-old-space-size=7168
       - name: Install electron deps
         run: |
           cd upstream/newIDE/electron-app
           npm install
-        env:
-          GD_PORTABLE_BUILD: 'true'
-      - name: Build Linux zip (unsigned portable)
+      # `dir` target: the .app only. GD_PORTABLE_BUILD sets identity to null,
+      # so electron-builder signs nothing and never calls the notarize hook.
+      # CI=false mirrors upstream's macOS job.
+      - name: Build universal .app (no signing, no notarization)
         run: |
           cd upstream/newIDE/electron-app
-          npm run build -- --linux zip --x64
+          CI=false npm run build -- --mac dir --universal --publish=never
         env:
-          GD_PORTABLE_BUILD: 'true'
-      - name: Smoke the built app (hook must hold on the real bundle)
+          NODE_OPTIONS: --max-old-space-size=7168
+      - name: Built output carries no update feed
         run: |
-          sudo apt-get update && sudo apt-get install -y xvfb unzip
-          BUILD_OUT="$(find upstream/newIDE/electron-app/dist -maxdepth 1 -name '*.zip' | head -n 1)"
-          echo "smoking $BUILD_OUT"
-          mkdir -p /tmp/rel/app && unzip -q "$BUILD_OUT" -d /tmp/rel/app
-          BIN="$(find /tmp/rel/app -maxdepth 2 -type f -name 'gdevelop*' | head -n 1)"
-          export HOME=/tmp/rel/home && mkdir -p "$HOME"
-          xvfb-run -a "$BIN" --no-sandbox --disable-gpu \
-            --disable-dev-shm-usage --user-data-dir=/tmp/rel/profile \
-            --heretek-smoke > /tmp/rel/smoke.log 2>&1
-          grep -a "HERETEK_SMOKE:" /tmp/rel/smoke.log | tail -1 > /tmp/rel/verdict.json
-          node -e "
-            const fs = require('fs');
-            const line = fs.readFileSync('/tmp/rel/verdict.json', 'utf8');
-            const verdict = JSON.parse(line.slice(line.indexOf('HERETEK_SMOKE:') + 14));
-            console.log(JSON.stringify(verdict, null, 2));
-            if (!verdict.ok) { console.error('SMOKE FAILED:', verdict.failures); process.exit(1); }
-            console.log('release smoke passed on built-from-patched-source app.');
-          "
+          FEED="$(find upstream/newIDE/electron-app/dist -name 'app-update.yml')"
+          if [ -n "$FEED" ]; then
+            echo "UPDATE FEED SURVIVED IN BUILD OUTPUT — refusing to upload:"; echo "$FEED"; exit 1
+          fi
+          echo 'no app-update.yml in build output.'
+      # Apple Silicon refuses to run code with no signature at all. An ad-hoc
+      # signature ("-") needs no certificate or secret and identifies no one;
+      # Gatekeeper still treats the download as unsigned (release notes say so).
+      - name: Ad-hoc sign so the arm64 slice can launch
+        run: |
+          APP="$(find upstream/newIDE/electron-app/dist -maxdepth 2 -name '*.app' | head -n 1)"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --display --verbose=2 "$APP" 2>&1 | grep -E 'Signature|TeamIdentifier|flags' || true
+          lipo -archs "$APP/Contents/MacOS/"*
+      - name: Smoke the built app (hook must hold on the real bundle)
+        timeout-minutes: 8
+        run: |
+          REL="$RUNNER_TEMP/rel"
+          mkdir -p "$REL"
+          BIN="$(find "$APP/Contents/MacOS" -maxdepth 1 -type f | head -n 1)"
+          echo "smoking $BIN"
+          "$BIN" --no-sandbox --disable-gpu --user-data-dir="$REL/profile" \
+            --heretek-smoke > "$REL/smoke.log" 2>&1 || true
+          node unlocked/scripts/assert-smoke-verdict.mjs "$REL/smoke.log"
+      - name: Zip the .app (ditto keeps the bundle + signature intact)
+        run: |
+          OUT="upstream/newIDE/electron-app/dist/GDevelop-Unlocked-mac-universal.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT"
+          ls -lh "$OUT"
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gdevelop-unlocked-linux-x64-${{ inputs.upstream_ref }}
-          path: upstream/newIDE/electron-app/dist/*.zip
+          name: gdevelop-unlocked-macos-universal-${{ inputs.upstream_ref }}
+          path: upstream/newIDE/electron-app/dist/GDevelop-Unlocked-mac-universal.zip
+          if-no-files-found: error
+
+  publish:
+    # Only on request, and only when no selected OS job failed. A skipped
+    # job (platform not selected) does not block; at least one must succeed.
+    needs: [build-linux, build-windows, build-macos]
+    if: >-
+      always() && inputs.publish == 'true' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      contains(needs.*.result, 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List what will be published
+        run: ls -lh dist && (cd dist && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
       - name: Publish GitHub release
-        if: inputs.publish == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: unlocked-${{ inputs.upstream_ref }}
           name: GDevelop-Unlocked ${{ inputs.upstream_ref }}
           body: |
-            Full build from patched upstream ${{ inputs.upstream_ref }} (11 patches + Tier-2 overlay + launcher hook).
-            Unsigned portable build. Auto-update DISABLED by design — re-download per release, never auto-updated over.
-          files: upstream/newIDE/electron-app/dist/*.zip
+            Full build of upstream GDevelop at `${{ inputs.upstream_ref }}` with the GDevelop-Unlocked patch stack applied (14 patches + Tier-2 AI Studio overlay + launcher hook). Every attached build passed the `--heretek-smoke` gate on its own OS before upload.
+
+            **What is in it**
+            - Tier-1: subscription/capability gates unlocked (logo and watermark toggles, hot reload, network preview, debugger).
+            - Tier-2: bring-your-own-key AI (Preferences → AI Settings) for any OpenAI-compatible endpoint, including local servers such as Ollama.
+
+            **Read before installing**
+            - **Unsigned.** These builds carry no publisher signature. Windows SmartScreen and macOS Gatekeeper will warn; on macOS, right-click → Open, or clear the quarantine flag (`xattr -dr com.apple.quarantine "GDevelop 5.app"`). The macOS app is ad-hoc signed only so Apple Silicon can launch it.
+            - **Auto-update is disabled by design.** The build ships no update feed; a stock update would replace the patched app. Download each new release from this page.
+            - Not affiliated with or supported by the GDevelop team. Analytics and other non-AI network behavior are unchanged from upstream.
+            - Verify downloads against `SHA256SUMS.txt`.
+          files: dist/*
+          fail_on_unmatched_files: true
