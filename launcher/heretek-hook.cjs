@@ -42,9 +42,9 @@ const SPOOFED_USAGE_URLS = [
 const UPDATER_PIN_MESSAGE =
   '[heretek] update downloaded: the Tier-1 hook (main.js loader line + ' +
   'launcher/*.cjs) is replaced by the updater payload on restart. ' +
-  'Re-run node scripts/apply-patches.mjs --asar <new-app.asar> --out ' +
-  '<patched.asar> before launching, or Tier-1 gates return. ' +
-  'See launcher/README.md ("auto-updater pin").';
+  'Re-inject before launching (extract the new app.asar, run node ' +
+  'scripts/inject-launcher.mjs --appdir <extracted-asar>, repack), or ' +
+  'Tier-1 gates return. See launcher/README.md ("auto-updater pin").';
 
 /**
  * Merge the unlock preload into window options. An explicitly set
@@ -450,15 +450,21 @@ function armSmokeMode(electronModule, opts) {
     app && typeof app.whenReady === 'function'
       ? app.whenReady()
       : Promise.resolve();
-  Promise.resolve(ready).then(() => {
-    const existing =
-      typeof options.existingWindows === 'function'
-        ? options.existingWindows()
-        : [];
-    existing.forEach(win => {
-      if (win && win.webContents) runProbe(win.webContents);
+  Promise.resolve(ready)
+    .then(() => {
+      const existing =
+        typeof options.existingWindows === 'function'
+          ? options.existingWindows()
+          : [];
+      existing.forEach(win => {
+        if (win && win.webContents) runProbe(win.webContents);
+      });
+    })
+    .catch(error => {
+      // Not fatal: windows created later still reach runProbe through
+      // browser-window-created; the timeout verdict covers "none ever".
+      logger.error('[heretek] smoke existing-window scan failed:', error);
     });
-  });
   logger.info('[heretek] smoke mode armed (--heretek-smoke).');
   return { armed: true };
 }

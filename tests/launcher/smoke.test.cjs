@@ -163,6 +163,31 @@ describe('smoke: arm sequence', () => {
     );
   });
 
+  it('a failing existing-window scan is logged, and later windows still probe', async () => {
+    const { electron, fireWindowCreated, fireLoad } =
+      makeFakeElectron(GOOD_RESULTS);
+    const { logger, records } = makeLogger();
+    let exitCode = null;
+    hook.armSmokeMode(electron, {
+      argv: ['node', 'app', '--heretek-smoke'],
+      logger,
+      exitFn: code => (exitCode = code),
+      timeoutMs: 1000,
+      existingWindows: () => {
+        throw new Error('getAllWindows unavailable');
+      },
+    });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(exitCode, null, 'scan failure must not decide the verdict');
+    assert.ok(
+      records.error.some(l => l.includes('existing-window scan failed'))
+    );
+    fireWindowCreated();
+    fireLoad();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(exitCode, 0);
+  });
+
   it('does nothing without the flag', () => {
     const { electron, listeners } = makeFakeElectron(GOOD_RESULTS);
     const { logger } = makeLogger();

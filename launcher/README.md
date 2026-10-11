@@ -1,8 +1,8 @@
 # launcher/ — Tier-1 runtime hook (Phase 3, issue #3)
 
 Runtime guarantee of the Tier-1 unlock when `patches/` alone cannot hold
-(e.g. a hunk drifted, or the operator runs a stock build). Defense in
-depth, three layers:
+(a hunk drifted, or the operator runs a stock build). Defense in depth,
+three layers:
 
 | Layer | File | Mechanism |
 |---|---|---|
@@ -33,23 +33,94 @@ into patch 01 by `scripts/generate-tier1-patches.mjs`:
 
 ## Install
 
-`node scripts/apply-patches.mjs --target <checkout>` (or `--asar`) applies
-patch 06 (loader line at the top of `main.js`) and syncs these three
-files next to it. Verify with `node scripts/apply-patches.mjs --check`.
+Pick the path by what you are holding. They are not interchangeable.
+
+### A. Source checkout (you will build the app yourself)
+
+```bash
+node scripts/apply-patches.mjs --target <upstream-checkout>
+```
+
+Applies patch 06 (loader line at the top of `electron-app/app/main.js`)
+together with the rest of the stack, and copies the three `.cjs` files
+next to `main.js`. This is what `release.yml` builds from. Re-check an
+already-patched tree at any time, read-only:
+
+```bash
+node scripts/apply-patches.mjs --verify-only --target <patched-checkout>
+```
+
+### B. Release artifact (a stock, already-built GDevelop)
+
+A release `app.asar` holds the **bundled** renderer, so source patches
+cannot apply to it. The launcher alone is enough for Tier-1 there:
+
+```bash
+npx --yes @electron/asar extract <app>/resources/app.asar <workdir>
+node scripts/inject-launcher.mjs --appdir <workdir>
+npx --yes @electron/asar pack <workdir> <app>/resources/app.asar
+```
+
+`inject-launcher.mjs` inserts the loader above the
+`const electron = require('electron');` anchor and syncs the three
+`.cjs` files. It is idempotent (a re-run is a verified no-op) and fails
+loudly if the anchor is gone. This is the path the `e2e` workflow's
+`tier1-smoke` job proves on every PR and every push to `main`/`develop`.
+Tier-2 (BYOK AI) is **not**
+delivered this way — it needs a source build (path A).
+
+### What does not work
+
+`apply-patches.mjs --asar <app.asar>` on a release asar: the driver
+extracts it, then every source hunk fails the dry-run against bundled
+code. That mode is only meaningful for an asar that holds source with
+`newIDE/` at its top level. `--check` runs the seam suite only; it
+verifies upstream shape, not an install.
+
+## Verifying a build
+
+Launch with `--heretek-smoke`. The hook rides the first window, probes
+the renderer after load, prints one line and exits:
+
+```
+HERETEK_SMOKE:{"ok":true,"failures":[],"results":{…}}
+```
+
+Exit `0` unlocked, `1` locked (see `failures`), `2` no window within
+180 s. Headless Linux needs a display (`xvfb-run -a <bin> --no-sandbox
+--disable-gpu --heretek-smoke`); see the workflow steps in
+`.github/workflows/e2e.yml` and `release.yml` for the exact invocation.
 
 ## Auto-updater pin
 
 `electron-updater` replaces the whole `app.asar` on update — the loader
-line and these files vanish on restart. Mitigations, in order:
+line and these files vanish on restart.
 
-1. `watchUpdater` logs `UPDATER_PIN_MESSAGE` (loud, in all logs) when an
-   update is staged, and sets `globalThis.__HERETEK__.updatePending`.
-2. After every update, re-run
-   `node scripts/apply-patches.mjs --asar <new-app.asar> --out <patched.asar>`
-   **before** launching. The driver refuses a silent no-op.
-3. The Phase 1 seam suite (`npm test`) runs weekly against the upstream
-   baseline — a red suite after an upstream release means the loader
-   anchor or a hunk moved; regenerate before repacking.
+- **Builds from `release.yml`** cannot update: the workflow strips the
+  update feed before building (`scripts/strip-updater-feed.mjs`) and
+  refuses to build if it survives.
+- **Stock build + path B** still has the upstream feed. `watchUpdater`
+  logs `UPDATER_PIN_MESSAGE` (loud, in all logs) when an update is
+  staged and sets `globalThis.__HERETEK__.updatePending`. After the
+  update, repeat path B on the new `app.asar` **before** launching.
 
 Do not enable `autoUpdater.autoDownload = true` unattended on hooked
 builds: a silent overnight update silently drops Tier-1.
+
+## Test doubles vs production
+
+`tests/launcher/` drives the hook with fake Electron objects. Two
+production facts the fakes must reproduce, each pinned by a test in
+`hook.test.cjs`:
+
+- `electron.BrowserWindow` is a **non-configurable** getter in real
+  Electron. Assignment and `defineProperty` both throw, the wrap returns
+  `false`, and the window fallback + network backstop carry the unlock
+  (`non-configurable export: wrap fails, fallbacks still deliver…`).
+  The `configurable: true` fake only models the wrappable case.
+- `session.defaultSession` throws before `app.whenReady()`; `webRequest`
+  setup is deferred, not dropped (`defers webRequest setup until app
+  ready`).
+
+No fake can prove real Chromium timing (seed before React hydrates);
+that is what the `--heretek-smoke` run on a real build is for.
