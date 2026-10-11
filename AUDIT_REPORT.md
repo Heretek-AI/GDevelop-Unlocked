@@ -189,3 +189,19 @@ in-tree but never executed remotely; (2) live-model proof of the studio
 loop (B) and live-browser XHR proof (D), both still open follow-ups;
 (3) rebase again whenever upstream touches the five merged files
 (`patches/REBASE.md` has the repeat procedure).
+
+## 8. Release-build addendum (2026-10-11): full source build green
+
+- New `release.yml` (manual dispatch): clone upstream ref → apply all
+  patches + overlay → strip updater feed → build renderer + Linux zip
+  (`GD_PORTABLE_BUILD` unsigned) → xvfb smoke gate → artifact/publish.
+- First green run (`38106050979`, ref `8301cdc`, publish=false): webpack
+  compiled with all 14 patches; built `gdevelop-5.6.283.zip` (200 MB)
+  boots with smoke `ok:true` (seed, limits 999, `gdevelop_startup`,
+  POST passthrough clean).
+- Two workflow bugs fixed along the way (doubled `unlocked/` path;
+  missing `UPSTREAM_DIR` for the seam gate); one real product bug found
+  by the compile (missing AiRequestUtils glue → patches 12–14, §7
+  follow-up in REBASE.md). Release tags older than the patch baseline
+  fail loudly at dry-run by design — rebase per `REBASE.md` before
+  building a new upstream tag.
