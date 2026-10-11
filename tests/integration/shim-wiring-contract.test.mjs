@@ -51,13 +51,15 @@ const CALL_SITES = {
   forkAiRequest: 'id',
   // Batch: inlined partitionAiRequestIds — only hosted ids go out.
   getAiRequestStatuses: 'partition',
-  // No id yet / no id at all: inlined selectBackend endpoint switch.
-  createAiRequest: 'endpoint',
-  createAiGeneratedEvent: 'endpoint',
-  createAssetSearch: 'endpoint',
-  createResourceSearch: 'endpoint',
-  createAiUserContentPresignedUrls: 'endpoint',
-  fetchAiSettings: 'endpoint',
+  // No id yet / no id at all: inlined selectBackend endpoint switch. Sites
+  // that receive a userId must ALSO branch on the offline BYOK user, so a
+  // `local-*` session stays local after the endpoint toggle is turned off.
+  createAiRequest: 'endpointOrLocalUser',
+  createAiGeneratedEvent: 'endpointOrLocalUser',
+  createAssetSearch: 'endpointOrLocalUser',
+  createResourceSearch: 'endpointOrLocalUser',
+  createAiUserContentPresignedUrls: 'endpointOrLocalUser',
+  fetchAiSettings: 'endpoint', // takes no userId
   // Offline BYOK user never lists hosted chats.
   getAiRequestSummaries: 'user',
   // Locally generated events carry their own `local-evt-` ids.
@@ -66,17 +68,19 @@ const CALL_SITES = {
   // BYOK mode (same rule as the presigned project-JSON upload); reading
   // back the attachments of a hosted chat stays hosted, except for the
   // offline BYOK user, who has none.
-  createAiAttachmentUploads: 'endpoint',
+  createAiAttachmentUploads: 'endpointOrLocalUser',
   createAiAttachmentDownloads: 'offline',
 };
 
+// Every listed fragment must appear before the first hosted request.
 const GUARDS = {
-  id: "aiRequestId.startsWith('local-ai-')",
-  partition: "!id.startsWith('local-ai-')",
-  endpoint: 'isCustomEndpointEnabled()',
-  user: 'userId === LOCAL_BYOK_USER_ID',
-  event: "aiGeneratedEventId.startsWith('local-evt-')",
-  offline: "userId.startsWith('local-')",
+  id: ["aiRequestId.startsWith('local-ai-')"],
+  partition: ["!id.startsWith('local-ai-')"],
+  endpoint: ['isCustomEndpointEnabled()'],
+  endpointOrLocalUser: ['isCustomEndpointEnabled()', "userId.startsWith('local-')"],
+  user: ['userId === LOCAL_BYOK_USER_ID'],
+  event: ["aiGeneratedEventId.startsWith('local-evt-')"],
+  offline: ["userId.startsWith('local-')"],
 };
 
 const HOSTED_CALL = /\b(?:apiClient|axios)\.(?:get|post|put|patch|delete)\(/;
@@ -89,18 +93,39 @@ function hostedCallSites(text) {
   while ((m = re.exec(text)) !== null) {
     // Prettier-formatted source: a top-level arrow function ends at the
     // first column-0 `};`.
-    const end = text.indexOf('\n};\n', m.index);
-    const body = text.slice(m.index, end === -1 ? text.length : end);
+    const found = text.indexOf('\n};\n', m.index);
+    const end = found === -1 ? text.length : found;
+    const body = text.slice(m.index, end);
     const hostedAt = body.search(HOSTED_CALL);
-    if (hostedAt !== -1) sites.set(m[1], { body, hostedAt });
+    if (hostedAt !== -1)
+      sites.set(m[1], { body, hostedAt, start: m.index, end });
   }
   return sites;
+}
+
+/**
+ * Hosted requests that sit outside every discovered call site — e.g. in a
+ * `function` declaration or a class method a rebase introduced. Discovery
+ * above is by declaration shape; this is the net under it, by request.
+ */
+function strayHostedRequests(text, sites) {
+  const ranges = [...sites.values()];
+  const stray = [];
+  const re = new RegExp(HOSTED_CALL.source, 'g');
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (!ranges.some(r => m.index >= r.start && m.index < r.end))
+      stray.push(text.slice(0, m.index).split('\n').length);
+  }
+  return stray;
 }
 
 /** Contract violations for one Generation.js text (empty = holds). */
 function contractViolations(text) {
   const violations = [];
   const sites = hostedCallSites(text);
+  for (const line of strayHostedRequests(text, sites))
+    violations.push(`line ${line}: hosted request outside any classified call site`);
   for (const name of sites.keys()) {
     if (!(name in CALL_SITES))
       violations.push(`${name}: hosted call site not classified in CALL_SITES`);
@@ -111,10 +136,11 @@ function contractViolations(text) {
       violations.push(`${name}: classified call site no longer issues a hosted request`);
       continue;
     }
-    if (kind === 'unguarded') continue;
-    const guardAt = site.body.indexOf(GUARDS[kind]);
-    if (guardAt === -1 || guardAt > site.hostedAt)
-      violations.push(`${name}: '${GUARDS[kind]}' does not precede the hosted request`);
+    for (const guard of GUARDS[kind]) {
+      const guardAt = site.body.indexOf(guard);
+      if (guardAt === -1 || guardAt > site.hostedAt)
+        violations.push(`${name}: '${guard}' does not precede the hosted request`);
+    }
   }
   for (const [name, site] of sites) {
     if (site.body.includes('${aiRequestId}') && CALL_SITES[name] !== 'id')
@@ -159,8 +185,36 @@ describe('integration: unlock-shim duplication contract (patch 07)', () => {
     // Proves the checker can fail: without patch 07 no call site has a
     // BYOK branch, so every guarded entry must be reported.
     const violations = contractViolations(pristine);
-    const guarded = Object.values(CALL_SITES).filter(k => k !== 'unguarded');
-    assert.equal(violations.filter(v => v.includes('does not precede')).length, guarded.length);
+    const expected = Object.values(CALL_SITES).reduce(
+      (count, kind) => count + GUARDS[kind].length,
+      0
+    );
+    assert.equal(
+      violations.filter(v => v.includes('does not precede')).length,
+      expected
+    );
+  });
+
+  it('negative controls: a weakened or undiscovered call site is caught', () => {
+    // 1. An endpoint route that keeps the toggle check but loses its
+    //    offline-user branch.
+    const weakened = patched.replace(
+      /(export const createAiRequest = async[\s\S]*?)isCustomEndpointEnabled\(\) \|\| \(userId && userId\.startsWith\('local-'\)\)/,
+      '$1isCustomEndpointEnabled()'
+    );
+    assert.notEqual(weakened, patched, 'fixture did not match — update the control');
+    assert.deepEqual(contractViolations(weakened), [
+      "createAiRequest: 'userId.startsWith('local-')' does not precede the hosted request",
+    ]);
+    // 2. A hosted request in a declaration form the discovery regex does
+    //    not match (what a rebase could introduce).
+    const extra =
+      patched + "\nexport async function extra() {\n  return apiClient.post('/x');\n}\n";
+    const line =
+      extra.split('\n').findIndex(l => l.includes("apiClient.post('/x')")) + 1;
+    assert.deepEqual(contractViolations(extra), [
+      `line ${line}: hosted request outside any classified call site`,
+    ]);
   });
 
   it('inlined id prefix is the shim prefix, at every id-carrying site', () => {
