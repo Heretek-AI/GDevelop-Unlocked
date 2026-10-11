@@ -1,8 +1,10 @@
 # patches/ — Tier-1 entitlement unlocks (Phase 2, issue #2)
 
-Stock upstream `app.asar` + these hunks = fork parity for Tier-1, with no
-205-file merge treadmill. Applied by `scripts/apply-patches.mjs`
-(extract -> patch -> repack); every hunk is gated by the Phase 1 seam suite.
+Stock upstream **source** + these hunks = fork parity for Tier-1, with no
+205-file merge treadmill. Applied by `scripts/apply-patches.mjs --target
+<checkout>` before building; every hunk is gated by the Phase 1 seam
+suite. They cannot apply to a release `app.asar` (bundled renderer) —
+that path is launcher-only, see `launcher/README.md`.
 
 ## Files
 

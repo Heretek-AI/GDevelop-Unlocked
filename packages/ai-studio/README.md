@@ -17,9 +17,11 @@ there is no donor checkout anywhere in build, test, or CI paths.
 
 ## Wiring
 
-Import rewiring is limited to `packages/unlock-shim/generation-shim.mjs`
-(routing predicates + fail-closed leak guard) plus the glue patches
-`07`–`11` (`patches/REBASE.md` records how the forward-ports were built).
+The glue patches `07`–`14` are the only rewiring (`patches/REBASE.md`
+records how the forward-ports were built). Patch 07 inlines the routing
+predicates; `packages/unlock-shim/generation-shim.mjs` is their tested
+reference implementation, not a shipped import (see its README,
+"Duplication contract").
 
 ## Desktop E2E (requires a built app — procedure, not automation)
 

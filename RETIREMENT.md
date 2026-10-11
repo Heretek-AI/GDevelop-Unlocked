@@ -12,7 +12,8 @@ was deleted. What remains is owner-side archival of the old repo
 - [x] `npm test` green with the fork checkout absent (no test reads any
       `FORK_DIR`; self-contained `MANIFEST.json` hashes pin the runtime).
 - [x] `node scripts/apply-patches.mjs --target <pristine-upstream>` green
-      (all 11 patches + launcher sync + Tier-2 overlay + marker verify).
+      (all 14 patches + launcher sync + Tier-2 overlay + marker verify;
+      re-verified 2026-10-11, now also in-suite via `tests/patches/apply.test.mjs`).
 - [ ] Desktop smoke on the patched build: logo uncheck, watermark
       uncheck, hot reload x17, wifi preview, debugger open (issue #2).
 - [ ] Desktop E2E: `http://localhost:11434/v1` generation + subagent
@@ -29,9 +30,11 @@ was deleted. What remains is owner-side archival of the old repo
    Heretek-AI/GDevelop-Unlocked. Donor commit f7d450a1d9aa068e33c0a0c9a3f9caaee3701f2f.`
 3. After archiving, Tier-1 ships only as `patches/` + `launcher/`
    (Phases 2–3); Tier-2 only as versioned `packages/ai-studio`
-   (Phase 4). Any future fork-sync need is a `scripts/extract-tier2.mjs`
-   re-run + `scripts/generate-tier2-patches.mjs` regeneration, reviewed
-   as a normal PR — never a merge treadmill.
+   (Phase 4). Any future donor-sync need is a curated forward-port per
+   `patches/REBASE.md` (plus, for the additive 09/10 only, an explicit
+   `scripts/generate-tier2-patches.mjs --fork <donor-checkout>` run),
+   reviewed as a normal PR — never a merge treadmill. The extractor
+   (`scripts/extract-tier2.mjs`) was deleted at cutover.
 
 ```bash
 # 1. (in the fork checkout, final state)
