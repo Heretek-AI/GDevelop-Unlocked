@@ -233,7 +233,7 @@ New findings:
 |---|---|---|---|
 | U1 | HIGH | The built artifact still ships `resources/app-update.yml` → `4ian/GDevelop`. Deleting the `publish` key makes electron-builder 26 derive the feed from `package.json` `repository`. Inert on the Linux zip (needs AppImage); a live self-downgrade path on Windows NSIS / macOS. | **FIXED** — `publish: null`, config evaluated, build output asserted per OS |
 | U2 | MEDIUM | The green release build used `master/latest` `libGD.js`, not the pinned commit's (detached HEAD → `unknown-branch` → fallback). The C++ core could silently diverge from the IDE source. | **FIXED** — checkout as `master` + `REQUIRES_EXACT_LIBGD_JS_VERSION` |
-| A2 | HIGH | Chat attachments have no BYOK branch (`createAiAttachmentUploads/Downloads` + three callers): same class as finding A. Source-level; not exercised live. | **OPEN** — pinned as a known gap by the contract test |
+| A2 | HIGH | Chat attachments had no BYOK branch (`createAiAttachmentUploads/Downloads` + three callers): same class as finding A. Reachable only for a logged-in user with the custom endpoint on (logged out, the UI refuses before uploading). Source-level; not exercised live. | **FIXED** in patch 07 — uploads throw before any hosted call in BYOK mode; downloads return not-found for the offline user. Contract test + driver marker. The chip shows the generic "upload failed" message. |
 | P3 | LOW | The last code path naming a donor checkout: `generate-tier2-patches.mjs` defaulted `--fork` to `review/GDevelop-Heretek`. | **FIXED** — `--fork` required |
 
 Layer-3 results (all on the real build): logo + watermark uncheck with no
@@ -249,7 +249,8 @@ zip) and macOS (universal, ad-hoc signed) — all `ok:true` including the
 XHR probe, exact `libGD.js`, no `app-update.yml` in any build output.
 `e2e` `38169762424` and `seam-tests` `38169764070` green.
 
-**Verdict:** the conditional PASS stands for the **patched-source build**,
-with A2 as the one open correctness gap in BYOK mode. The
+**Verdict:** the conditional PASS stands for the **patched-source build**;
+A2, the one correctness gap found in BYOK mode, is closed at source level
+(a logged-in live run is still owed). The
 **launcher-only path** (stock build + injector) was not actually
 unlocking XHR traffic before this branch; do not rely on it from `main`.

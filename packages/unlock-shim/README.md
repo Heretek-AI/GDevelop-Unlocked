@@ -21,7 +21,7 @@ patch 07 to a pristine fixture copy and checks every hosted call site:
 |---|---|---|
 | `isLocalAiRequestId(id)` | `aiRequestId.startsWith('local-ai-')` short-circuit before the hosted request | every function whose hosted URL carries the id (`getAiRequest`, `addMessageToAiRequest`, `retry`/`suspend`/`update`/`delete`/`fork`, feedback, suggestions, message update) |
 | `partitionAiRequestIds(ids)` | `localIds` / `hostedIds` filters; only `hostedIds` are sent | `getAiRequestStatuses` |
-| `selectBackend({customConfig})` | `isCustomEndpointEnabled() \|\| userId.startsWith('local-')` early return | `createAiRequest`, `createAiGeneratedEvent`, asset/resource search, presigned URLs, `fetchAiSettings` |
+| `selectBackend({customConfig})` | `isCustomEndpointEnabled() \|\| userId.startsWith('local-')` early return (a throw for attachment uploads) | `createAiRequest`, `createAiGeneratedEvent`, asset/resource search, presigned URLs, attachment uploads, `fetchAiSettings` |
 | `guardHostedCall` / `assertNoLocalIdsLeak` | **not inlined** — there is no fail-closed wrapper in the shipped code; the short-circuits above are the only barrier | — |
 
 Consequences to keep in mind:
@@ -32,9 +32,13 @@ Consequences to keep in mind:
   call site fails the suite).
 - The contract test is source-order proof, not execution (its header
   states the limit). Live zero-egress proof is issue #12.
-- Known gap, pinned by the test: `createAiAttachmentUploads` and
-  `createAiAttachmentDownloads` (upstream-new, preserved by the 07
-  forward-port) have no BYOK branch.
+- Attachments (upstream-new, no fork precedent): `createAiAttachmentUploads`
+  throws in BYOK mode before any hosted call — an upload goes to
+  GDevelop's storage, which a custom endpoint cannot read back.
+  `createAiAttachmentDownloads` returns not-found for the offline BYOK
+  user; attachments of a hosted chat are hosted data and are still read
+  from the hosted API. These two guards are this repo's own addition to
+  patch 07, not part of the fork delta.
 - `isCustomEndpointEnabled(config)` here is pure (caller supplies the
   config); the shipped one in `CustomAIClient` reads `gd-custom-ai-config`
   from localStorage itself.

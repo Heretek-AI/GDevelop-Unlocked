@@ -62,11 +62,12 @@ const CALL_SITES = {
   getAiRequestSummaries: 'user',
   // Locally generated events carry their own `local-evt-` ids.
   getAiGeneratedEvent: 'event',
-  // KNOWN GAP (issue #12): upstream-new attachment endpoints, preserved
-  // by the 07 forward-port with no BYOK branch — a chat attachment is
-  // sent to the hosted API even when the custom endpoint is enabled.
-  createAiAttachmentUploads: 'unguarded',
-  createAiAttachmentDownloads: 'unguarded',
+  // Attachments live in GDevelop's storage. Uploading one is refused in
+  // BYOK mode (same rule as the presigned project-JSON upload); reading
+  // back the attachments of a hosted chat stays hosted, except for the
+  // offline BYOK user, who has none.
+  createAiAttachmentUploads: 'endpoint',
+  createAiAttachmentDownloads: 'offline',
 };
 
 const GUARDS = {
@@ -75,6 +76,7 @@ const GUARDS = {
   endpoint: 'isCustomEndpointEnabled()',
   user: 'userId === LOCAL_BYOK_USER_ID',
   event: "aiGeneratedEventId.startsWith('local-evt-')",
+  offline: "userId.startsWith('local-')",
 };
 
 const HOSTED_CALL = /\b(?:apiClient|axios)\.(?:get|post|put|patch|delete)\(/;
@@ -186,17 +188,30 @@ describe('integration: unlock-shim duplication contract (patch 07)', () => {
     );
   });
 
-  it('known gap stays visible: attachment endpoints have no BYOK branch', () => {
-    // Pins the gap so it cannot be forgotten OR silently "fixed" without
-    // reclassifying: when a BYOK branch lands, move these to a guarded
-    // kind in CALL_SITES and tick the zero-egress item in issue #12.
+  it('BYOK never uploads an attachment: refused before any hosted call', () => {
+    // An upload hands the file to GDevelop's storage. A custom endpoint
+    // cannot read it back, so in BYOK mode it would be a pure leak —
+    // the function must throw, not fall through and not return fake URLs.
     const sites = hostedCallSites(patched);
-    for (const name of ['createAiAttachmentUploads', 'createAiAttachmentDownloads']) {
-      const { body, hostedAt } = sites.get(name);
-      const before = body.slice(0, hostedAt);
-      for (const guard of Object.values(GUARDS))
-        assert.ok(!before.includes(guard), `${name} gained a BYOK branch — reclassify it`);
-      assert.ok(!before.includes('local-'), `${name} gained a BYOK branch — reclassify it`);
-    }
+    const upload = sites.get('createAiAttachmentUploads');
+    const beforeHosted = upload.body.slice(0, upload.hostedAt);
+    const guardAt = beforeHosted.indexOf(
+      "if (isCustomEndpointEnabled() || (userId && userId.startsWith('local-')))"
+    );
+    assert.ok(guardAt !== -1, 'upload guard missing or weaker than the presigned-URL rule');
+    assert.match(beforeHosted.slice(guardAt), /\{\s*throw new Error\(/);
+    assert.ok(
+      beforeHosted.indexOf('getAuthorizationHeader()') > guardAt,
+      'guard must run before the auth header is even requested'
+    );
+
+    const download = sites.get('createAiAttachmentDownloads');
+    const offline = download.body.slice(0, download.hostedAt);
+    assert.match(
+      offline,
+      /userId\.startsWith\('local-'\)\) \{\s*return attachmentIds\.map\(/,
+      'offline BYOK user must get not-found entries, not a hosted call'
+    );
+    assert.ok(offline.includes("error: 'not-found'"));
   });
 });

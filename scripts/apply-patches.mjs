@@ -151,6 +151,8 @@ const MARKERS = [
       'isCustomEndpointEnabled',
       "startsWith('local-ai-')",
       'customCreateAiRequest',
+      // BYOK attachment guard (not part of the fork delta — added here).
+      'Attachments are not available while a custom AI endpoint is enabled',
     ],
     excludes: [],
   },
