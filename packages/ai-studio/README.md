@@ -1,19 +1,14 @@
-# packages/ai-studio — Tier-2 extraction (Phase 4, issue #4)
+# packages/ai-studio — Tier-2 runtime (self-contained)
 
-~8.9k-line BYOK AI + multi-agent Studio, moved **verbatim** out of the
-fork. The fork is a donor, not a delivery vehicle. Never hand-edit
-files under `AI/` or `AiGeneration/` here — re-run the extractor:
-
-```bash
-node scripts/extract-tier2.mjs --fork <fork-checkout>
-```
-
-`MANIFEST.json` pins every file (sha256); `tests/tier2/extract.test.mjs`
-fails if any byte drifts from the donor.
+~8.9k-line BYOK AI + multi-agent Studio. Historically extracted from the
+(now-retired) Heretek fork; this package is now the canonical source —
+there is no donor checkout anywhere in build, test, or CI paths.
+`MANIFEST.json` pins every file (bytes + sha256);
+`tests/tier2/extract.test.mjs` fails if any byte drifts.
 
 ## Contents
 
-| Path | Donor | Notes |
+| Path | Historical origin | Notes |
 |---|---|---|
 | `AI/CustomAIClient.js` | `newIDE/app/src/AI/CustomAIClient.js` (5870 lines) | OpenAI-compatible client, 39-tool `GDEVELOP_OPENAI_TOOLS`, SSE streaming, `gd-custom-ai-*` localStorage keys. **Zero `api.gdevelop.io` references** (pinned by test) |
 | `AI/CustomAIClient.spec.js` | co-located spec | Run inside `newIDE/app` (`react-app-rewired test`), not here |
@@ -23,10 +18,8 @@ fails if any byte drifts from the donor.
 ## Wiring
 
 Import rewiring is limited to `packages/unlock-shim/generation-shim.mjs`
-(routing predicates + fail-closed leak guard) plus the generated glue
-patches `07-generation-glue.patch` (Generation.js branches) and
-`08-preferences-ai.patch` (`ai` prefs tab + storage). The extracted
-modules themselves are byte-identical to the donor.
+(routing predicates + fail-closed leak guard) plus the glue patches
+`07`–`11` (`patches/REBASE.md` records how the forward-ports were built).
 
 ## Desktop E2E (requires a built app — procedure, not automation)
 

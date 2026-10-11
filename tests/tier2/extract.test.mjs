@@ -1,6 +1,6 @@
-// Tier-2 extraction tests (Phase 4): packages/ai-studio/ stays
-// byte-identical to the fork donor, and the extracted client keeps the
-// BYOK invariant (no hosted generation references).
+// Tier-2 package tests: packages/ai-studio/ is self-contained and intact.
+// Tamper-evidence comes from MANIFEST.json hashes pinned in THIS repo —
+// no donor checkout, no fork clone, nothing outside this tree.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,52 +11,33 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, '..', '..');
 const PACKAGE = path.join(ROOT, 'packages', 'ai-studio');
-const FORK =
-  process.env.FORK_DIR || path.join(ROOT, 'review', 'GDevelop-Heretek');
 
 function sha256(abs) {
   return crypto.createHash('sha256').update(fs.readFileSync(abs)).digest('hex');
 }
 
-describe('tier-2: verbatim extraction', () => {
+describe('tier-2: self-contained package integrity', () => {
   const manifest = JSON.parse(
     fs.readFileSync(path.join(PACKAGE, 'MANIFEST.json'), 'utf8')
   );
 
-  it('every manifest file matches the donor byte-for-byte', () => {
+  it('every manifest file exists with pinned bytes and hash', () => {
     assert.ok(
       Object.keys(manifest.files).length >= 19,
       'manifest looks truncated'
     );
     for (const [pkgRel, meta] of Object.entries(manifest.files)) {
       const pkgAbs = path.join(PACKAGE, pkgRel);
-      const donorAbs = path.join(FORK, meta.donor);
       assert.ok(fs.existsSync(pkgAbs), `package file missing: ${pkgRel}`);
-      assert.ok(
-        fs.existsSync(donorAbs),
-        `donor moved in fork: ${meta.donor} (update scripts/extract-tier2.mjs explicitly)`
-      );
-      if (pkgRel.startsWith('dev-harness/')) {
-        // Dev harness is ported, not vendored: the repo root is
-        // "type": "module" so the donor's CJS `require` throws
-        // ReferenceError here (see mock-ai-provider.js ESM port). The
-        // MANIFEST sha below still pins the exact bytes we ship.
-        assert.equal(
-          sha256(pkgAbs),
-          meta.sha256,
-          `manifest stale for ${pkgRel} (re-run the extractor)`
-        );
-        continue;
-      }
       assert.equal(
-        sha256(pkgAbs),
-        sha256(donorAbs),
-        `drift vs donor: ${pkgRel}`
+        fs.statSync(pkgAbs).size,
+        meta.bytes,
+        `size drift (tamper?): ${pkgRel}`
       );
       assert.equal(
         sha256(pkgAbs),
         meta.sha256,
-        `manifest stale for ${pkgRel} (re-run the extractor)`
+        `hash drift (tamper?): ${pkgRel}`
       );
     }
   });

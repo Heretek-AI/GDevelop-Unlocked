@@ -1,9 +1,9 @@
-// Tier-2 glue patch tests (Phase 4): committed verbatim patches (09/10)
-// equal fresh generator output (deterministic — any hand-edit or fork
-// drift goes red); curated forward-ports (07/08/11, see patches/REBASE.md)
-// are pinned instead by anti-revert assertions; everything dry-runs clean
-// on pristine upstream copies.
-import { describe, it, before, after } from 'node:test';
+// Tier-2 glue patch tests: every patch dry-runs clean on pristine
+// upstream copies; curated forward-ports (07/08/11, see patches/REBASE.md)
+// and additive deltas (09/10) are pinned by assertions on the committed
+// patch text itself. Nothing here needs a donor checkout — this repo
+// stands alone (fork-independence, 2026-10-11).
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -15,8 +15,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, '..', '..');
 const UPSTREAM =
   process.env.UPSTREAM_DIR || path.join(ROOT, 'review', 'GDevelop');
-const FORK =
-  process.env.FORK_DIR || path.join(ROOT, 'review', 'GDevelop-Heretek');
 
 const GLUE = [
   // Curated forward-ports (patches/REBASE.md): must dry-run clean and must
@@ -37,16 +35,17 @@ const GLUE = [
     ],
     noDelete: ['newEffectDialogDefaultTab'],
   },
-  // Verbatim deltas: committed patches equal fresh output byte-for-byte.
+  // Purely additive deltas: committed patches must contain zero
+  // minus-lines (any deletion would be an upstream revert by construction).
   {
     patch: '09-prepare-ai-content.patch',
     files: ['newIDE/app/src/AiGeneration/PrepareAiUserContent.js'],
-    verbatim: true,
+    additive: true,
   },
   {
     patch: '10-ai-chat-affordance.patch',
     files: ['newIDE/app/src/AiGeneration/AiRequestChat/Utils.js'],
-    verbatim: true,
+    additive: true,
   },
   {
     patch: '11-studio-runtime-mount.patch',
@@ -63,39 +62,7 @@ function run(cmd, args, cwd) {
   });
 }
 
-describe('tier-2: glue patches are generated, not hand-edited', () => {
-  let regenDir;
-  before(() => {
-    regenDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tier2-regen-'));
-    const r = run(
-      'node',
-      [
-        'scripts/generate-tier2-patches.mjs',
-        '--upstream',
-        UPSTREAM,
-        '--fork',
-        FORK,
-        '--out',
-        regenDir,
-      ],
-      ROOT
-    );
-    assert.equal(r.status, 0, `generator failed:\n${r.stdout}\n${r.stderr}`);
-  });
-  after(() => fs.rmSync(regenDir, { recursive: true, force: true }));
-
-  it('committed verbatim patches equal fresh output byte-for-byte', () => {
-    for (const { patch, verbatim } of GLUE) {
-      if (!verbatim) continue;
-      const committed = fs.readFileSync(
-        path.join(ROOT, 'patches', patch),
-        'utf8'
-      );
-      const fresh = fs.readFileSync(path.join(regenDir, patch), 'utf8');
-      assert.equal(fresh, committed, `${patch} was hand-edited or is stale`);
-    }
-  });
-
+describe('tier-2: glue patches apply cleanly and preserve upstream', () => {
   it('curated forward-ports never delete upstream-new symbols', () => {
     for (const { patch, noDelete } of GLUE) {
       if (!noDelete) continue;
@@ -109,6 +76,19 @@ describe('tier-2: glue patches are generated, not hand-edited', () => {
           `${patch} deletes upstream-new symbol: ${symbol} (see patches/REBASE.md)`
         );
       }
+    }
+  });
+
+  it('additive deltas contain zero deletions', () => {
+    for (const { patch, additive } of GLUE) {
+      if (!additive) continue;
+      const text = fs.readFileSync(path.join(ROOT, 'patches', patch), 'utf8');
+      const deletions = text.split('\n').filter(l => /^-[^-]/.test(l));
+      assert.equal(
+        deletions.length,
+        0,
+        `${patch} deletes lines (upstream revert by construction):\n${deletions.slice(0, 5).join('\n')}`
+      );
     }
   });
 

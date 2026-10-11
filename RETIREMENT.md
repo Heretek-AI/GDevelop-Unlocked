@@ -1,17 +1,18 @@
-# Phase 6: Decommission fork — retirement runbook (issue #6)
+# Phase 6: Fork independence — DONE in-repo (issue #6)
 
-The 205-file fork (`Heretek-AI/GDevelop-Heretek`) stops being the
-delivery vehicle and stays only as the Tier-2 donor archive. Nothing
-here is automated: archiving and workflow deletion are destructive and
-need a human owner. Do not close issue #6 until every box is ticked.
+The 205-file fork (`Heretek-AI/GDevelop-Heretek`) is no longer referenced
+by any build, test, or CI path in this repo. Code independence landed
+2026-10-11: donor-comparison tests were replaced with self-contained
+integrity pins, the fork clone was removed from CI, and the extractor
+was deleted. What remains is owner-side archival of the old repo
+(destructive, needs a human — do not close issue #6 until ticked).
 
-## Preconditions (M1 + M2 must hold without the fork present)
+## Preconditions (re-verified at independence cutover)
 
-- [ ] `npm test` green with the fork checkout absent
-      (`FORK_DIR` pointed at an empty dir — only `tests/tier2/extract.test.mjs`
-      needs the donor, and only to re-verify byte-identity).
-- [ ] `node scripts/apply-patches.mjs --target <pristine-upstream>` green
-      (all 8 patches + launcher sync + marker verify).
+- [x] `npm test` green with the fork checkout absent (no test reads any
+      `FORK_DIR`; self-contained `MANIFEST.json` hashes pin the runtime).
+- [x] `node scripts/apply-patches.mjs --target <pristine-upstream>` green
+      (all 11 patches + launcher sync + Tier-2 overlay + marker verify).
 - [ ] Desktop smoke on the patched build: logo uncheck, watermark
       uncheck, hot reload x17, wifi preview, debugger open (issue #2).
 - [ ] Desktop E2E: `http://localhost:11434/v1` generation + subagent
@@ -43,12 +44,8 @@ gh repo archive Heretek-AI/GDevelop-Heretek --yes
 ## Post-retirement invariant
 
 The delivery path (patcher, hook, preload, shim, userscript) never
-*reads* the fork: `GDevelop-Heretek` appears in delivery code only in
-provenance comments (`Unlocked in GDevelop-Heretek`) and in donor-dir
-defaults owned by the extractor (`scripts/extract-tier2.mjs`,
-`scripts/generate-tier2-patches.mjs`) and the two provenance tests
-(`tests/tier2/extract.test.mjs`, `tests/tier2/tier2-patches.test.mjs`),
-which fail loudly — by design — when the donor is absent. Everything
-else in `npm test` is fork-free (verified: 63 pass with `FORK_DIR`
-pointed at an empty dir; the 1 failure + 2 cancellations are the
-donor-provenance tests failing loudly by design — not silent drift).
+*reads* the fork: the name `GDevelop-Heretek` appears only in historical
+provenance notes and in unlock-marker strings shipped by design
+(`Unlocked in GDevelop-Heretek`). No test, script, or workflow clones,
+reads, or regenerates from a donor checkout — verified: the full suite
+passes with no fork fixture present.

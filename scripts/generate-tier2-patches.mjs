@@ -5,7 +5,10 @@
 // deltas are woven through their files, so each patch carries the exact
 // fork diff — no hand-editing, no silent shaping.
 //
-//   node scripts/generate-tier2-patches.mjs --upstream review/GDevelop --fork review/GDevelop-Heretek
+// On-demand regeneration of the additive 09/10 deltas only. Needs an
+// explicit fork checkout (the retired donor — not present in this repo,
+// not needed by any test or CI path):
+//   node scripts/generate-tier2-patches.mjs --upstream review/GDevelop --fork <donor-checkout>
 //
 // Each patch round-trips (`patch -p1 --dry-run` on a pristine copy)
 // before it is written. Regeneration is deterministic: committed output

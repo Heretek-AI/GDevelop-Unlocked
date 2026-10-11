@@ -15,16 +15,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # Baselines are gitignored locally (multi-GB); CI clones the pins:
-      # upstream verified-at commit + fork donor baseline (provenance tests).
+      # Baselines are gitignored locally (multi-GB); CI clones the pin:
+      # upstream verified-at commit. This repo is fork-independent: no
+      # donor checkout exists anywhere in test or build paths.
       - name: Clone pinned upstream baseline
         run: |
           git clone --no-checkout https://github.com/4ian/GDevelop review/GDevelop
           git -C review/GDevelop checkout 8301cdcaa48b496f48a28a6e3a56fa833eaeddff
-      - name: Clone fork donor baseline
-        run: |
-          git clone --no-checkout https://github.com/Heretek-AI/GDevelop-Heretek review/GDevelop-Heretek
-          git -C review/GDevelop-Heretek checkout f7d450a1d9aa068e33c0a0c9a3f9caaee3701f2f
       - name: Run full suite (seams + patcher + launcher + tier-2 + web)
         run: npm test
       - name: Patcher gate (seams + patch inventory)

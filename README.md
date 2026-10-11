@@ -1,9 +1,10 @@
 # GDevelop-Unlocked
 
-Surgical, patch-stack conversion of the
-[GDevelop-Heretek](https://github.com/Heretek-AI/GDevelop-Heretek) fork
-(unlocked premium gates + Bring-Your-Own-Key local AI studio) into a
-maintainable delivery shape — no 205-file merge treadmill.
+Surgical, patch-stack conversion of the premium unlocks +
+Bring-Your-Own-Key local AI studio pioneered in the (now-retired)
+[GDevelop-Heretek](https://github.com/Heretek-AI/GDevelop-Heretek) fork —
+into a maintainable delivery shape with **zero dependency on that fork**.
+No 205-file merge treadmill, no donor checkout in any build/test/CI path.
 
 Three delivery mechanisms, all applied onto stock upstream GDevelop:
 
@@ -29,14 +30,15 @@ node scripts/apply-patches.mjs --target <upstream-checkout-or-extracted-asar>
 node scripts/inject-launcher.mjs --appdir <extracted-asar-dir>
 ```
 
-Requirements: Node ≥ 22, `patch`, git. Test fixtures (`review/GDevelop`,
-`review/GDevelop-Heretek`, multi-GB) are gitignored; CI clones its pins.
+Requirements: Node ≥ 22, `patch`, git. The upstream test fixture
+(`review/GDevelop`, multi-GB) is gitignored; CI clones the pinned upstream
+commit. Nothing else external is needed — this repo is fork-independent.
 
 ## Layout
 
 - `patches/` — 11 patches + `README.md` (per-patch targets) + `REBASE.md`
 - `scripts/` — `apply-patches.mjs` (driver), `generate-tier1/2-patches.mjs`
-  (generators), `extract-tier2.mjs`, `inject-launcher.mjs`
+  (generators), `inject-launcher.mjs`
 - `launcher/` — `heretek-hook.cjs`, `preload-unlock.cjs`, `unlock-payloads.cjs`
 - `packages/ai-studio/` — extracted Tier-2 runtime + `dev-harness/` mock provider
 - `packages/unlock-shim/` — routing/leak-guard invariants (reference impl)

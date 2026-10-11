@@ -51,8 +51,10 @@ node scripts/apply-patches.mjs --check      # seam gate
 - The driver (`apply-patches.mjs`) owns two install paths: launcher `.cjs`
   sync and Tier-2 overlay (`syncTier2Files`); `--asar` and `--target` must
   both run both. Markers live in `MARKERS` — extend them with any new patch.
-- Donor pin (`f7d450a`) lives in three places: `UPSTREAM_BASELINE.json`,
-  `.github/workflows/seam-tests.yml`, `RETIREMENT.md`. Keep them in sync.
-- Upstream sync point awareness: the fork lags upstream, so any new
-  verbatim delta must be audited for deletions of upstream-new symbols
-  before shipping (the R1–R3 regression class in `AUDIT_REPORT.md`).
+- Upstream pin lives in one place: `UPSTREAM_BASELINE.json`
+  (`verifiedAtUpstreamCommit`). There is deliberately **no donor/fork pin
+  anywhere** — this repo is fork-independent (see `RETIREMENT.md`).
+- Patch provenance: 07/08/11 are curated forward-ports of fork work
+  (`patches/REBASE.md`); any *new* verbatim delta must still be audited
+  for deletions of upstream-new symbols before shipping (the R1–R3
+  regression class in `AUDIT_REPORT.md`).
