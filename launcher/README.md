@@ -8,7 +8,24 @@ three layers:
 |---|---|---|
 | Preload seed | `preload-unlock.cjs` | `webPreferences.preload` **where the export is wrappable**; runs before the bundle: seeds `window.__HERETEK__`, wraps `fetch` + `XHR` for exactly two GET endpoints |
 | Window fallback (usual production path) | `heretek-hook.cjs` | `browser-window-created` + `did-finish-load` `executeJavaScript` of the composed fallback source — same wrappers, applied before React hydrates. Production Electron's `BrowserWindow` export is non-configurable, so this (not the preload) carries the unlock there |
-| Network backstop | `heretek-hook.cjs` | `webRequest.onBeforeRequest` redirects usage GETs to `data:` URLs (proven live: stock v5.6.283 + launcher only → `HERETEK_SMOKE ok:true`) |
+| Network backstop | `heretek-hook.cjs` | `webRequest.onBeforeRequest` redirects usage GETs to `data:` URLs. **Not effective on current Electron** — see "Known limits" |
+
+## Known limits (measured on a real build, Electron 32.3.3 / Chromium 128)
+
+- **The network backstop does not serve anything.** Chromium refuses the
+  https → `data:` redirect for XHR and fetch (`net::ERR_UNSAFE_REDIRECT`):
+  a usage GET that reaches this layer *fails* instead of returning the
+  unlocked body. Only requests issued before the window fallback has
+  installed its wrappers (or from another realm, e.g. an iframe) reach
+  it. The `--heretek-smoke` verdict proves the renderer `fetch` wrapper,
+  not this layer.
+- **The renderer wrappers carry the unlock**, installed at
+  `did-finish-load`. A usage request the app issues before that point is
+  not wrapped (timing residual; not measured — needs a logged-in session).
+- The app's own client is axios 0.18.1 over XHR. The XHR wrapper is
+  proven on the real build against that adapter's settle condition
+  (`readyState === 4`, non-zero status) and against `loadend` listeners;
+  it has not been observed serving a real logged-in profile fetch.
 
 ## Why not `Module._load`?
 

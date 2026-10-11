@@ -17,7 +17,10 @@
 //     (fetch/XHR spoof + __HERETEK__ seed) before React hydrates.
 //   - Network backstop: session.defaultSession.webRequest.onBeforeRequest
 //     redirects GET usage/{limits,subscription-v2} to data: URLs.
-//     Firebase auth/JWT untouched.
+//     Firebase auth/JWT untouched. NOTE: measured on Electron 32 /
+//     Chromium 128, the https -> data: redirect is refused for XHR/fetch
+//     (net::ERR_UNSAFE_REDIRECT), so this layer fails the request rather
+//     than serving it — see launcher/README.md ("Known limits").
 // Testability: `electron` is injectable; tests/launcher/hook.test.cjs
 // drives the whole module with fakes (no Electron needed).
 'use strict';

@@ -99,45 +99,44 @@ function createFetchWrapper(originalFetch, scope) {
 
 function setXhrResponse(xhr, body) {
   const text = JSON.stringify(body);
-  try {
-    xhr.readyState = 4;
-    xhr.status = 200;
-    xhr.responseText = text;
-    xhr.response = text;
-  } catch (error) {
-    // Real XHR attributes are getter-only on the prototype: shadow them
-    // per-instance instead.
-    Object.defineProperty(xhr, 'readyState', {
-      value: 4,
+  const state = {
+    readyState: 4,
+    status: 200,
+    statusText: 'OK',
+    responseText: text,
+    response: xhr.responseType === 'json' ? body : text,
+  };
+  // Real XHR state attributes are getter-only prototype accessors:
+  // assignment throws in strict code but silently no-ops in sloppy code,
+  // so a try/assign/catch leaves readyState at 1 there and the consumer
+  // never settles (seen live on Electron 32, issue #12). Always shadow
+  // per instance instead of assigning.
+  Object.keys(state).forEach(function shadowXhrState(name) {
+    Object.defineProperty(xhr, name, {
+      value: state[name],
       configurable: true,
+      enumerable: true,
+      writable: true,
     });
-    Object.defineProperty(xhr, 'status', { value: 200, configurable: true });
-    Object.defineProperty(xhr, 'responseText', {
-      value: text,
-      configurable: true,
-    });
-    Object.defineProperty(xhr, 'response', {
-      value: text,
-      configurable: true,
-    });
-  }
+  });
 }
 
 function fireXhrLoad(xhr) {
-  if (typeof xhr.onreadystatechange === 'function') {
+  // A real XHR is an EventTarget: dispatching reaches the on* handler
+  // attributes AND addEventListener listeners, in the order a real
+  // response fires them (axios < 0.22 settles on readystatechange, newer
+  // on loadend). Fakes without dispatchEvent get their handler
+  // properties called directly.
+  const canDispatch =
+    typeof xhr.dispatchEvent === 'function' && typeof Event === 'function';
+  ['readystatechange', 'load', 'loadend'].forEach(function fire(type) {
     try {
-      xhr.onreadystatechange();
+      if (canDispatch) xhr.dispatchEvent(new Event(type));
+      else if (typeof xhr['on' + type] === 'function') xhr['on' + type]();
     } catch (error) {
       // Listener errors must not break the spoof.
     }
-  }
-  if (typeof xhr.onload === 'function') {
-    try {
-      xhr.onload();
-    } catch (error) {
-      // Listener errors must not break the spoof.
-    }
-  }
+  });
 }
 
 function patchXhr(XHRClass, scope) {
@@ -236,8 +235,11 @@ function getRendererFallbackSource() {
       throw new Error(`[heretek] cannot embed missing function: ${name}`);
     return fn.toString();
   }).join('\n');
+  // 'use strict' keeps the embedded functions on the semantics they were
+  // written and unit-tested under (this module is strict); Function#toString
+  // does not carry the directive across.
   return (
-    '(function(){\n' +
+    "(function(){\n'use strict';\n" +
     consts +
     '\n' +
     fns +
