@@ -36,6 +36,7 @@ const LAUNCHER_FILES = [
   'heretek-hook.cjs',
   'preload-unlock.cjs',
   'unlock-payloads.cjs',
+  'debug-logger.cjs',
 ];
 // Tier-2 runtime the glue patches import: Generation.js (07) and
 // PrepareAiUserContent.js (09) import ../../AI/CustomAIClient;
@@ -45,6 +46,7 @@ const LAUNCHER_FILES = [
 // Spec files (*.spec.js) are deliberately NOT shipped into the target.
 const TIER2_FILES = [
   'AI/CustomAIClient.js',
+  'AiGeneration/Studio/DebugEvents.js',
   'AiGeneration/Studio/EditApprovalLabel.js',
   'AiGeneration/Studio/FinalizeSubAgents.js',
   'AiGeneration/Studio/LoopGuard.js',

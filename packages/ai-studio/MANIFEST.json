@@ -10,6 +10,11 @@
       "origin": "newIDE/app/src/AI/CustomAIClient.spec.js",
       "sha256": "0152072739b6590f004e886b8a5787cd769a529f044f14e48ca7e78ecc2a560a"
     },
+    "AiGeneration/Studio/DebugEvents.js": {
+      "bytes": 1426,
+      "origin": "repo-original (T02 debug emitter, not a donor extraction)",
+      "sha256": "9e5e5a551f6655d5aeecc04cb1d0e6c04f13e820607fabfb5816b14b7219f76d"
+    },
     "AiGeneration/Studio/EditApprovalLabel.js": {
       "bytes": 1308,
       "origin": "newIDE/app/src/AiGeneration/Studio/EditApprovalLabel.js",
@@ -21,9 +26,9 @@
       "sha256": "708de36210d000af56e795280eaa5dd450e32cedb4a54b7b031353a6cc4a679f"
     },
     "AiGeneration/Studio/LoopGuard.js": {
-      "bytes": 9401,
+      "bytes": 10420,
       "origin": "newIDE/app/src/AiGeneration/Studio/LoopGuard.js",
-      "sha256": "0ad4c6f5d6312a38f56e0385b8408adec72634c95d7252a3ff193af1e667101e"
+      "sha256": "09bde299559edc5b9c5f74d7605c7c4ef8ba0eeb4f044168171183f51676b86d"
     },
     "AiGeneration/Studio/NudgePolicy.js": {
       "bytes": 3821,

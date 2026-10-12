@@ -73,6 +73,152 @@ function recordSpoof(scope, url) {
   }
 }
 
+// In-memory renderer log (T02): the main-process JSONL appender cannot be
+// reached from here, so renderer events buffer on
+// `window.__HERETEK_LOGGER__` (capped) for inspection via
+// executeJavaScript / smoke. Fully self-contained (no module-scope frees)
+// so it embeds into the did-finish-load fallback source. `Date` is probed,
+// not assumed: exotic realms may not provide it.
+function createRendererLogger(scope) {
+  var events = [];
+  var MAX_RENDERER_LOG_EVENTS = 500;
+  function now() {
+    try {
+      if (typeof Date !== 'undefined' && Date && typeof Date.now === 'function')
+        return Date.now();
+    } catch (error) {
+      // No clock: fall through to 0.
+    }
+    return 0;
+  }
+  function isoFor(ts) {
+    try {
+      if (typeof Date !== 'undefined' && Date)
+        return new Date(ts).toISOString();
+    } catch (error) {
+      // Leave iso empty rather than breaking the log path.
+    }
+    return '';
+  }
+  function pushRecord(level, event, data) {
+    var ts = now();
+    var record = {
+      ts: ts,
+      iso: isoFor(ts),
+      source: 'renderer',
+      level: level,
+      event: event,
+      data: data && typeof data === 'object' ? data : {},
+    };
+    try {
+      events.push(record);
+      while (events.length > MAX_RENDERER_LOG_EVENTS) events.shift();
+    } catch (error) {
+      // Observability only.
+    }
+    return record;
+  }
+  return {
+    events: events,
+    push: pushRecord,
+    debug: function rendererLogDebug(event, data) {
+      return pushRecord('debug', event, data);
+    },
+    info: function rendererLogInfo(event, data) {
+      return pushRecord('info', event, data);
+    },
+    warn: function rendererLogWarn(event, data) {
+      return pushRecord('warn', event, data);
+    },
+    error: function rendererLogError(event, data) {
+      return pushRecord('error', event, data);
+    },
+  };
+}
+
+function installRendererLogger(scope) {
+  var rendererLogger = createRendererLogger(scope);
+  try {
+    scope.__HERETEK_LOGGER__ = rendererLogger;
+  } catch (error) {
+    return rendererLogger;
+  }
+  // Renderer crash observability: hook first, before wrapping console, so
+  // a failure below still leaves the error taps installed.
+  try {
+    if (scope && typeof scope.addEventListener === 'function') {
+      scope.addEventListener('error', function heretekRendererError(event) {
+        pushRendererError(rendererLogger, event);
+      });
+      scope.addEventListener('unhandledrejection', function heretekUnhandledRejection(event) {
+        var reason =
+          event && event.reason !== undefined ? event.reason : event;
+        rendererLogger.error('unhandled-rejection', {
+          reason: reason instanceof Error ? reason.message : String(reason),
+        });
+      });
+    }
+  } catch (error) {
+    // Taps are best-effort.
+  }
+  // Intercept console.error/warn: record the call, then pass through so
+  // devtools output is unchanged.
+  try {
+    if (scope && scope.console) {
+      ['error', 'warn'].forEach(function tapConsoleLevel(level) {
+        var original = scope.console[level];
+        if (typeof original !== 'function') return;
+        scope.console[level] = function heretekConsoleTap() {
+          var args = Array.prototype.slice.call(arguments);
+          rendererLogger[level === 'error' ? 'error' : 'warn'](
+            level === 'error' ? 'console-error' : 'console-warn',
+            { args: args.map(safeConsoleArg) }
+          );
+          return original.apply(this, args);
+        };
+      });
+    }
+  } catch (error) {
+    // Never break console.
+  }
+  return rendererLogger;
+}
+
+function pushRendererError(rendererLogger, event) {
+  var message = '';
+  try {
+    if (event) {
+      if (typeof event.message === 'string') message = event.message;
+      else message = String(event);
+    }
+  } catch (error) {
+    message = '';
+  }
+  var data = { message: message };
+  try {
+    if (event && typeof event.filename === 'string')
+      data.filename = event.filename;
+    if (event && typeof event.lineno === 'number') data.lineno = event.lineno;
+  } catch (error) {
+    // Keep the message-only record.
+  }
+  rendererLogger.error('renderer-error', data);
+}
+
+function safeConsoleArg(value) {
+  try {
+    if (value instanceof Error)
+      return { error: value.message, stack: String(value.stack).slice(0, 500) };
+    if (value && typeof value === 'object')
+      return JSON.parse(JSON.stringify(value));
+    if (typeof value === 'function') return '[function]';
+    if (typeof value === 'undefined') return '[undefined]';
+    return value;
+  } catch (error) {
+    return '[unserializable]';
+  }
+}
+
 function createFetchWrapper(originalFetch, scope) {
   return function heretekFetch(input, init) {
     const rawUrl =
@@ -190,6 +336,7 @@ function patchXhr(XHRClass, scope) {
 
 function installRendererHook(scope) {
   seedIdentity(scope);
+  installRendererLogger(scope);
   if (scope.fetch) {
     try {
       scope.fetch = createFetchWrapper(scope.fetch.bind(scope), scope);
@@ -227,6 +374,10 @@ const FALLBACK_EMBEDDED_FUNCTIONS = [
   'resolveUrlSafe',
   'spoofBodyForRequest',
   'recordSpoof',
+  'createRendererLogger',
+  'pushRendererError',
+  'safeConsoleArg',
+  'installRendererLogger',
   'createFetchWrapper',
   'setXhrResponse',
   'fireXhrLoad',
@@ -271,6 +422,10 @@ module.exports = {
   resolveUrlSafe,
   spoofBodyForRequest,
   recordSpoof,
+  createRendererLogger,
+  pushRendererError,
+  safeConsoleArg,
+  installRendererLogger,
   createFetchWrapper,
   setXhrResponse,
   fireXhrLoad,

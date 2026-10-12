@@ -20,6 +20,7 @@ const LAUNCHER_FILES = [
   'heretek-hook.cjs',
   'preload-unlock.cjs',
   'unlock-payloads.cjs',
+  'debug-logger.cjs',
 ];
 
 const ANCHOR = "const electron = require('electron');";
