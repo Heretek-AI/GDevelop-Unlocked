@@ -254,7 +254,7 @@
              !isCallApproved(functionCall)
          );
  
-@@ -554,13 +681,406 @@
+@@ -554,13 +681,409 @@
          }
        }
  
@@ -567,6 +567,9 @@
 +            });
 +          } catch (error) {
 +            console.error('Error while spawning a studio sub-agent:', error);
++            // T06 (#23): a child startup failure fails ONLY this tool call.
++            // It never touches the parent guard streak and never suspends or
++            // constrains the parent: the parent stays alive for serial fallback.
 +            spawnResult = { error: 'The sub-agent could not be started.' };
 +          }
 +
@@ -662,7 +665,7 @@
  
        // The "modified outside editor" callbacks each refresh the editor and can
        // trigger an in-game editor hot reload. Firing them once per function
-@@ -669,7 +1189,7 @@
+@@ -669,7 +1192,7 @@
            // Explorer sub-agent scripts are read-only: restrict their
            // `run_script` to non-mutating functions (defense in depth).
            runScriptReadOnly: isReadOnlyScriptContext,
@@ -671,15 +674,25 @@
              name: functionCall.name,
              arguments: functionCall.arguments,
              call_id: functionCall.call_id,
-@@ -761,13 +1281,55 @@
+@@ -761,13 +1284,65 @@
            return;
          }
  
 +        // Record outcomes for the loop guard's error-storm trip (a real success
 +        // clears it; a failure advances it).
++        // T06 (#23) isolation: ONLY editor-dispatched calls feed the parent
++        // guard. Spawn failures, offline-docs, local-plan, no-project, role
++        // denials, and loop-guard warnings already have terminal results and
++        // must never advance the parent error streak nor constrain it — a
++        // child that fails to start fails its own call; the parent retries
++        // serially instead of suspending.
 +        if (guard) {
++          const editorCallIds = new Set(
++            callsForEditor.map(functionCall => functionCall.call_id)
++          );
 +          results.forEach(result => {
 +            if (result.status !== 'finished') return;
++            if (!editorCallIds.has(result.call_id)) return;
 +            if (result.success) guard.recordSuccess();
 +            else guard.recordError();
 +          });
@@ -732,7 +745,7 @@
        } finally {
          // Flush the coalesced editor notifications for everything modified in
          // this batch (one hot reload instead of one per call). In `finally` so
-@@ -787,7 +1349,9 @@
+@@ -787,7 +1362,9 @@
          }
  
          // Release the lock so these calls can be retried if needed
@@ -743,7 +756,7 @@
          functionCallsToProcess.forEach(functionCall => {
            inFlightFunctionCallIdsRef.current.delete(
              `${aiRequest.id}:${functionCall.call_id}`
-@@ -824,9 +1388,12 @@
+@@ -824,9 +1401,12 @@
        getAssetStoreTagForNewObject,
        generateEvents,
        onSendEditorFunctionCallResults,
@@ -756,7 +769,7 @@
      ]
    );
  
-@@ -870,9 +1437,50 @@
+@@ -870,9 +1450,50 @@
      [onProcessFunctionCalls, allFunctionCallsToProcess]
    );
  
@@ -807,7 +820,7 @@
    };
  };
  
-@@ -977,7 +1585,6 @@
+@@ -977,7 +1598,6 @@
      editorFunctionCallResultsStorage,
      isFetchingSuggestions,
      setIsFetchingSuggestions,
@@ -815,7 +828,7 @@
      setSelectedAiRequestId,
      selectedAiRequest,
    } = React.useContext(AiRequestContext);
-@@ -1036,20 +1643,19 @@
+@@ -1036,20 +1656,19 @@
          // Then ask for some.
          if (
            !selectedAiRequest ||
@@ -847,7 +860,7 @@
  
          // Check if there are tools being run. If so, no suggestions at this time.
          const hasFunctionsCallsToProcess =
-@@ -1139,7 +1745,7 @@
+@@ -1139,7 +1758,7 @@
            : null;
          const preparedAiUserContent = await prepareAiUserContent({
            getAuthorizationHeader,
@@ -856,7 +869,7 @@
            simplifiedProjectJson,
            projectSpecificExtensionsSummaryJson,
            eventsJson: null,
-@@ -1153,7 +1759,7 @@
+@@ -1153,7 +1772,7 @@
            const aiRequestWorkingForSuggestions = await getAiRequestSuggestions(
              getAuthorizationHeader,
              {
@@ -865,7 +878,7 @@
                aiRequestId: selectedAiRequest.id,
                suggestionsType: isLastMessageFunctionCallOutputProjectInitialization
                  ? 'list-with-explanations'
-@@ -1525,39 +2131,12 @@
+@@ -1525,39 +2144,12 @@
      [profile, setSelectedAiRequestId]
    );
  

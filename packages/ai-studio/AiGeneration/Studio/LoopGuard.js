@@ -6,6 +6,15 @@ import { emitStudioDebugEvent } from './DebugEvents';
 /**
  * The local loop guard: a circuit breaker for a BYOK agent.
  *
+ * Scope is strictly single-request (T06 #23): one guard instance per
+ * `aiRequest.id` (see `loopGuardsRef` in Utils.js), counting only that
+ * request's own turns — consecutive identical calls (repeat), consecutive
+ * failures (error storm), turns without user input, and turns without
+ * project progress (repeat-without-progress, sub-agents only). A child's
+ * startup failure never touches its parent's streak and never constrains
+ * the parent: `spawnSubAgent` failures fail only their own `spawn_agent`
+ * tool call (`success:false`) so the parent stays alive for serial fallback.
+ *
  * Ported from munder-difflin's `src/main/breaker.ts`, narrowed to what this
  * editor can actually observe. Under BYOK there is no server, so nothing counts
  * a runaway local agent: the hosted `repeated-tool-call-loop` error can never
@@ -43,6 +52,13 @@ export type LoopGuardDecision = {|
   /** True when the level changed since the previous `evaluate` (either way). */
   changed: boolean,
 |};
+
+/**
+ * T06 (#23) isolation scope marker: guards are per-request only. A test
+ * asserts this constant exists so the single-request + repeat-without-
+ * progress contract cannot silently regress to a shared/global guard.
+ */
+export const LOOP_GUARD_SCOPE: string = 'single-request';
 
 export const DEFAULT_LOOP_GUARD_CONFIG = {
   enabled: true,
