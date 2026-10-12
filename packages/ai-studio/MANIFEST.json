@@ -1,9 +1,9 @@
 {
   "files": {
     "AI/CustomAIClient.js": {
-      "bytes": 208828,
+      "bytes": 210819,
       "origin": "newIDE/app/src/AI/CustomAIClient.js",
-      "sha256": "2dd976b936908115d08374851121a077d2b2b6c314a029a4bc52ab7125f51723"
+      "sha256": "0934ccb0060cf2c5607ecb192d855189d3fdc679545ee41ad748cd81f642a64b"
     },
     "AI/CustomAIClient.spec.js": {
       "bytes": 257794,
@@ -102,5 +102,5 @@
       "sha256": "45c2915841b0a6c0f17db7a297a39ca1dfb8b889d74f018f87d1815cadf17c26"
     }
   },
-  "provenance": "Historical origin only: extracted in 2026-10 from the Heretek fork (now retired). This repo never reads the donor \u2014 integrity is self-contained via the pinned bytes/sha256 below."
+  "provenance": "Historical origin only: extracted in 2026-10 from the Heretek fork (now retired). This repo never reads the donor — integrity is self-contained via the pinned bytes/sha256 below."
 }

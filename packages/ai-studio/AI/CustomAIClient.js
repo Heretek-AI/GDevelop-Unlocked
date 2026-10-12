@@ -2086,7 +2086,7 @@ export const GDEVELOP_OPENAI_TOOLS: Array<{|
     function: {
       name: 'search_docs',
       description:
-        'Search GDevelop documentation for functions, behaviors, and instructions.',
+        'Search GDevelop documentation for functions, behaviors, and instructions. [Offline in local BYOK mode: rely on internal GDevelop knowledge and on-project verification]',
       parameters: {
         type: 'object',
         properties: {
@@ -2101,7 +2101,7 @@ export const GDEVELOP_OPENAI_TOOLS: Array<{|
     function: {
       name: 'read_full_docs',
       description:
-        'Read full documentation for specific GDevelop extensions or features.',
+        'Read full documentation for specific GDevelop extensions or features. [Offline in local BYOK mode: rely on internal GDevelop knowledge and on-project verification]',
       parameters: {
         type: 'object',
         properties: {
@@ -3969,6 +3969,50 @@ const getToolsForStudioRequest = (
 export const BACKEND_ONLY_TOOL_NAMES: Array<string> = [
   'get_game_starter_summary',
 ];
+
+/**
+ * T03 (#24) offline docs tools: the hosted docs backend is unreachable in
+ * local BYOK mode. Their descriptions carry the offline suffix (above) and
+ * every local call fails closed immediately with no network lag — see
+ * `buildOfflineDocsResult` and the Utils.js pre-pass that routes them
+ * before the editor dispatch.
+ */
+export const OFFLINE_DOCS_SUFFIX: string =
+  ' [Offline in local BYOK mode: rely on internal GDevelop knowledge and on-project verification]';
+
+export const OFFLINE_DOCS_MESSAGE: string =
+  'Documentation backend is offline in local mode. Rely on internal GDevelop knowledge and verify against the open project.';
+
+export const OFFLINE_DOCS_TOOL_NAMES: Array<string> = [
+  'search_docs',
+  'read_full_docs',
+];
+
+export const isOfflineDocsTool = (toolName: string): boolean =>
+  OFFLINE_DOCS_TOOL_NAMES.includes(toolName);
+
+/**
+ * Fail-closed result for an offline docs call. Synchronous with no network
+ * I/O so a docs lookup can never stall a local turn.
+ */
+export const buildOfflineDocsResult = (toolName: string): Object => ({
+  success: false,
+  offline: true,
+  message: `${OFFLINE_DOCS_MESSAGE} (tool: ${toolName})`,
+});
+
+/**
+ * T03 (#24) local plan tool: `create_or_update_plan` is uncallable upstream
+ * (`EditorFunctions/index.js` fails it as "handled server-side"). Under BYOK
+ * it is routed to `Studio/PlanStore.js` (validate + merge over the request's
+ * existing plan) by the Utils.js pre-pass — never to the editor dispatch.
+ * Kept in `GDEVELOP_OPENAI_TOOLS` so the manager keeps planning; the pre-pass
+ * is what makes it a live tool instead of a dead one.
+ */
+export const LOCAL_PLAN_TOOL_NAMES: Array<string> = ['create_or_update_plan'];
+
+export const isLocalPlanTool = (toolName: string): boolean =>
+  LOCAL_PLAN_TOOL_NAMES.includes(toolName);
 
 export const withoutBackendOnlyTools = (tools: Array<Object>): Array<Object> =>
   tools.filter(
