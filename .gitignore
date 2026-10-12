@@ -8,3 +8,5 @@ coverage/
 .DS_Store
 # Local LLM credentials (live keys) — never commit.
 .env
+# Transient ticket worktrees + worktree lock file (see AGENTS.md worktree law).
+.worktrees/
