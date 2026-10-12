@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+reviews:
+  profile: chill
+  poem: false
+  review_status: false
+  # Patch files are generator output or curated forward-ports, pinned by tests/patches/.
+  path_filters:
+    - "!patches/**"
+  auto_review:
+    enabled: true
+    drafts: false

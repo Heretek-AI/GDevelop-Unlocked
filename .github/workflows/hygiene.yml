@@ -1,0 +1,16 @@
+name: Hygiene
+
+# Keeps machine-local paths out of tracked files. The check itself lives in
+# Heretek-AI/.github.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    uses: Heretek-AI/.github/.github/workflows/hygiene.yml@main
