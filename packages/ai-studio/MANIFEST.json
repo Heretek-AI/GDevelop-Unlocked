@@ -71,9 +71,9 @@
       "sha256": "12df5f3f54a52e3c2c72646e6825360206eec0521dd6f15d73cd39660b21e0d2"
     },
     "AiGeneration/Studio/UseStudioRuntime.js": {
-      "bytes": 11187,
+      "bytes": 14337,
       "origin": "newIDE/app/src/AiGeneration/Studio/UseStudioRuntime.js",
-      "sha256": "ecc51b28d00baf1ccd7d38d542e4a9237cd145cd863586c6fae6e587d03564c3"
+      "sha256": "684f5f46c18f6b40dfadf01756ae62621e9c28a82d3a74a423bea61e09014cc3"
     },
     "dev-harness/mock-ai-provider.js": {
       "bytes": 9862,
