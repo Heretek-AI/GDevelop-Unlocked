@@ -100,8 +100,9 @@ jobs:
       - name: Smoke the built app (hook must hold on the real bundle)
         timeout-minutes: 8
         run: |
-          sudo apt-get update && sudo apt-get install -y xvfb unzip
+          sudo apt-get update && sudo apt-get install -y xvfb unzip zip
           BUILD_OUT="$(find upstream/newIDE/electron-app/dist -maxdepth 1 -name '*.zip' | head -n 1)"
+          BUILD_OUT="$(realpath "$BUILD_OUT")"
           echo "smoking $BUILD_OUT"
           REL="$RUNNER_TEMP/rel"
           mkdir -p "$REL/app" "$REL/home" && unzip -q "$BUILD_OUT" -d "$REL/app"
@@ -110,6 +111,8 @@ jobs:
           node unlocked/scripts/configure-electron-fuses.mjs "$BIN"
           # Artifact integrity and permission sanitization pass
           node unlocked/scripts/verify-linux-artifacts.mjs "$REL/app"
+          # Repack the hardened binary and verified tree into the distribution zip
+          (cd "$REL/app" && zip -q -FS -r "$BUILD_OUT" .)
           HOME="$REL/home" xvfb-run -a "$BIN" --no-sandbox --disable-gpu \
             --disable-dev-shm-usage --user-data-dir="$REL/profile" \
             --heretek-smoke > "$REL/smoke.log" 2>&1 || true
@@ -381,6 +384,8 @@ jobs:
           fail_on_unmatched_files: true
       - name: Dispatch Homebrew tap repository bump
         if: env.TAP_GITHUB_TOKEN != ''
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.TAP_GITHUB_TOKEN }}
