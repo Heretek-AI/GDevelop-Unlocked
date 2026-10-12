@@ -1,6 +1,6 @@
 # CLAUDE CODE RESEARCH PROMPT: GDEVELOP PLUGIN AUDIT & HERETEK SURGICAL CONVERSION
 
-> **How to Use**: Copy and paste the entire prompt below directly into **Claude Code** (or run `claude` inside `/home/john/Projects/GDevelop-Unlocked` and pass this file).
+> **How to Use**: Copy and paste the entire prompt below directly into **Claude Code** (or run `claude` inside the repo root and pass this file).
 
 ***
 
@@ -8,10 +8,10 @@
 
 ## Context & Repository Locations
 You are tasked with conducting an exhaustive technical audit of two local repositories:
-1. **Upstream GDevelop**: `/home/john/Projects/GDevelop-Unlocked/review/GDevelop`
+1. **Upstream GDevelop**: `review/GDevelop`
    - Upstream GitHub: https://github.com/4ian/GDevelop
    - The official open-source 2D/3D no-code game engine (Core C++, Emscripten/Wasm `GDevelop.js`, Pixi/Three runtime `GDJS`, and React/Electron `newIDE`).
-2. **GDevelop-Heretek (BYOK Edition)**: `/home/john/Projects/GDevelop-Unlocked/review/GDevelop-Heretek`
+2. **GDevelop-Heretek (BYOK Edition)**: `review/GDevelop-Heretek`
    - Fork GitHub: https://github.com/Heretek-AI/GDevelop-Heretek
    - A fork maintaining daily syncs with upstream that unlocks premium subscription features and adds a Bring-Your-Own-Key (BYOK) local AI client and multi-agent game studio.
    - Reference documentation in fork: `AGENTS.md`, `fork-divergence.json`, `MAINTENANCE.md`, and README feature comparison.
@@ -25,7 +25,7 @@ Analyze whether maintaining an upstream-diverging 205-file fork can be replaced 
 
 ## Phase 1: Upstream Architecture & Plugin Capability Audit
 
-Investigate `/home/john/Projects/GDevelop-Unlocked/review/GDevelop`:
+Investigate `review/GDevelop`:
 1. **Disambiguate Engine Extensions vs. IDE Plugins:**
    - Examine `review/GDevelop/Extensions/` and `review/GDevelop/GDJS/Runtime/`.
    - Confirm whether "Extensions" in GDevelop strictly apply to the **game engine runtime** (`gdjs.RuntimeBehavior`, `gdjs.RuntimeObject`, actions, conditions, and Pixi/Three renderers) or if any extension points exist for the editor itself.
@@ -45,7 +45,7 @@ Investigate `/home/john/Projects/GDevelop-Unlocked/review/GDevelop`:
 
 ## Phase 2: Feature-by-Feature Entitlement Dissection
 
-Compare `/home/john/Projects/GDevelop-Unlocked/review/GDevelop` with `/home/john/Projects/GDevelop-Unlocked/review/GDevelop-Heretek`.
+Compare `review/GDevelop` with `review/GDevelop-Heretek`.
 Audit the exact implementation of every feature listed in the Heretek Feature Comparison table:
 
 ### 1. Watermark, Startup Logo, & Splash Duration Clamps
