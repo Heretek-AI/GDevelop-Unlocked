@@ -22,7 +22,10 @@ additive). Full audit trail: `AUDIT_REPORT.md`.
 
 ```bash
 npm test                                   # full suite (unit + integration), offline
+npm run test:e2e                            # BYOK loop end-to-end (live provider + scratch project)
+npm run test:opencode                       # opencode-focused subset (unit + opencode-* + e2e)
 node scripts/apply-patches.mjs --check     # seam gate only, no filesystem changes
+node scripts/verify-upstream-rebase.mjs    # rebase drift gate: full stack vs pristine upstream HEAD
 
 # Apply everything to a pristine upstream checkout (then build it):
 node scripts/apply-patches.mjs --target <upstream-checkout>
@@ -41,17 +44,28 @@ commit. Nothing else external is needed — this repo is fork-independent.
 
 - `patches/` — 14 patches + `README.md` (per-patch targets) + `REBASE.md`
 - `scripts/` — `apply-patches.mjs` (driver), `generate-tier1/2-patches.mjs`
-  (generators), `inject-launcher.mjs`, `strip-updater-feed.mjs` (release)
+  (generators), `verify-upstream-rebase.mjs` (rebase drift gate),
+  `inject-launcher.mjs`, `strip-updater-feed.mjs` (release)
 - `launcher/` — `heretek-hook.cjs`, `preload-unlock.cjs`, `unlock-payloads.cjs`
+  (+ `debug-logger.cjs`: `--heretek-debug-log <path>` / `HERETEK_DEBUG_LOG`;
+  inspect with `node scripts/dump-debug-log.mjs <path>`)
 - `packages/ai-studio/` — extracted Tier-2 runtime + `dev-harness/` mock provider
 - `packages/unlock-shim/` — routing/leak-guard invariants (reference impl)
-- `tests/` — `seams/`, `patches/`, `launcher/`, `tier2/`, `web/`, `integration/`
+- `packages/opencode-provider/` — local OpenAI-compatible daemon
+  (`node packages/opencode-provider/cli.mjs [--port 0]`); target it from
+  Preferences → AI Settings for BYOK
+- `packages/opencode-gdevelop/` — OpenCode plugin (`index.mjs`, id
+  `gdevelop`): six `gdevelop_*` tools + `gdevelop-architect` persona, zero
+  deps, zero egress (see its README)
+- `tests/` — `seams/`, `patches/`, `launcher/`, `tier2/`, `web/`, `integration/`, `e2e/`
 - `docs/` — `upstream-ai-provider-rfc.md` and friends
 - `web-userscript/` — web-editor demo userscript (not a delivery path)
 
 ## CI
 
-- `seam-tests` — full `npm test` + patcher gate against the pinned upstream commit
+- `seam-tests` — full `npm test` + patcher gate + rebase gate
+  (`verify-upstream-rebase.mjs`: full stack vs pristine baseline) against
+  the pinned upstream commit
 - `e2e` — release-artifact smoke under `xvfb` (`tier1-smoke`), OpenAI-contract
   check against the committed mock (`byok-mock`), real Ollama on schedule (`byok-ollama`)
 - `release` — manual dispatch: patched source → full build → smoke gate →
@@ -62,5 +76,6 @@ commit. Nothing else external is needed — this repo is fork-independent.
 - Upstream baseline: `UPSTREAM_BASELINE.json` (the only pin — there is no
   donor pin; `tests/patches/pins.test.mjs` keeps the workflows on it)
 - Retirement plan for the donor fork: `RETIREMENT.md`
-- Latest audit verdict: **conditional PASS** (`AUDIT_REPORT.md` §7) —
-  remaining work is live CI/model/browser proof, not code changes.
+- Latest audit verdict: **conditional PASS** (`AUDIT_REPORT.md` §10) —
+  213/213 + 5/5 e2e green, rebase gate clean at the pin; remaining work
+  is live CI/model/browser proof, not code changes.

@@ -259,3 +259,60 @@ A2, the one correctness gap found in BYOK mode, is closed at source level
 (a logged-in live run is still owed). The
 **launcher-only path** (stock build + injector) was not actually
 unlocking XHR traffic before this branch; do not rely on it from `main`.
+
+## 10. Milestone gate addendum (2026-10-12): Phase 4 on `integration/v0.2`
+
+Tickets T01–T13 landed sequentially on `integration/v0.2` (merge commits
+`f35beec`…`b08959e` pre-T13), each under worktree isolation with
+explicit staging, target + full-suite QA, and an auditor diff pass.
+Fixture `review/GDevelop` verified empty (`status --short`) before and
+after every merge.
+
+Full gate, executed 2026-10-12 (all real I/O, offline, bare `node:test`):
+
+| Gate | Result |
+|---|---|
+| `npm test` | **213/213 pass, 0 fail** (62 suites) |
+| `npm run test:opencode` (new, T11) | **60/60 pass** (unit + `opencode-*` integration + e2e; overlaps the other suites by design — a focused re-run, not new count) |
+| `npm run test:e2e` (new, T11) | **5/5 pass** (`tests/e2e/gdevelop-opencode-byok-e2e.test.mjs`) |
+| `node scripts/apply-patches.mjs --check` | green (seam suite green) |
+| `node scripts/verify-upstream-rebase.mjs` (new, T12) | **CLEAN**: all 14 patches apply + marker-verify at `8301cdcaa48b496f48a28a6e3a56fa833eaeddff` |
+
+Distinct-test total: **218** (213 suite + 5 e2e), above the ≥145 gate.
+Stated limits (unchanged from §5/§9): no React/JSDOM in-repo, so the e2e
+exercises the `CustomAIClient` HTTP contract plus the real disk mutation
+rather than the Flow-typed module itself; live CI re-run and live-model /
+logged-in proof remain owner-side steps.
+
+Issue rollup (all work on `integration/v0.2` unless noted):
+
+| Issue | Status after Phase 4 |
+|---|---|
+| #6 fork archival | Code independence done in-repo (`RETIREMENT.md`); owner-side archival of `Heretek-AI/GDevelop-Heretek` is the remaining human step — do not close until ticked |
+| #7 upstream RFC | Noted: `docs/upstream-ai-provider-rfc.md` (+ `docs/upstream-drafts/credit-read-hardening.*`); no upstream PR opened from here |
+| #8 AI-studio epic | **Fulfilled**: T02 debug logging, T03 manifest pruning, T04 no-project remedy, T05 suspended UI, T06 storm-guard isolation, patches 07–14 + `packages/ai-studio/` overlay |
+| #20 opencode-bridge epic | **Fulfilled**: T07 control-shim, T08 provider daemon, T09 plugin tools, T10 architect agent, T11 e2e loop proving tool_calls → disk mutation → concluded generation with zero `api.gdevelop.io` egress |
+| #26 LICENSE | **Closed in T01**: MIT `LICENSE` + `package.json` license field |
+| #12 subagent loop proof | T11 e2e: 83-request-style loop replaced by a 5-assertion live loop (plan-equivalent tool round-trip, counter-server no-egress proof); logged-in live run still owed |
+| #10 signing/CI | `release.yml` Windows (nsis+zip) + macOS (universal) jobs confirmed pinned/healthy; signing stays unsigned-by-design, documented in `docs/release-signing.md` (+T12 runner-health section) |
+| #13 rebase runbook | `patches/REBASE.md` + executable gate `scripts/verify-upstream-rebase.mjs`, wired as the CI "Rebase gate" step in `seam-tests.yml` |
+| #19 E2E BYOK loop | **Closed in T11** (`tests/e2e/`, `test:e2e` / `test:opencode` scripts) |
+
+Usage pointers added this phase:
+
+- **Debug logging:** launch with `--heretek-debug-log <path>` (or
+  `HERETEK_DEBUG_LOG=<path>`); inspect with
+  `node scripts/dump-debug-log.mjs <path>`. Off by default; see
+  `launcher/README.md`.
+- **Plugin + bridge:** point the OpenCode config at
+  `packages/opencode-gdevelop/index.mjs` (plugin id `gdevelop`: six
+  `gdevelop_*` tools + `gdevelop-architect` persona, zero deps, zero
+  egress); serve the model endpoint with
+  `node packages/opencode-provider/cli.mjs [--port 0] [--host 127.0.0.1]`
+  and target it from Preferences → AI Settings. Details in
+  `packages/opencode-gdevelop/README.md`.
+
+**Verdict: CONDITIONAL PASS stands, scope extended.** The stack is
+213/213 + 5/5 e2e green with the rebase gate clean at the pin. What is
+still owed is unchanged in kind from §9: live CI execution, a
+tool-capable live-model loop, and owner-side fork archival (#6).
