@@ -1,9 +1,9 @@
 {
   "files": {
     "AI/CustomAIClient.js": {
-      "bytes": 210819,
+      "bytes": 212395,
       "origin": "newIDE/app/src/AI/CustomAIClient.js",
-      "sha256": "0934ccb0060cf2c5607ecb192d855189d3fdc679545ee41ad748cd81f642a64b"
+      "sha256": "28e24dde3cde3941f6ae514d415fcc5069ce2229f3d888e95aa767ebef7e22f1"
     },
     "AI/CustomAIClient.spec.js": {
       "bytes": 257794,
@@ -51,9 +51,9 @@
       "sha256": "66a7d577f12fccaa1b23d89bc7ba02c9bca07058358cc53d3ecfe50d604ef1b8"
     },
     "AiGeneration/Studio/Roles.js": {
-      "bytes": 12493,
+      "bytes": 12736,
       "origin": "newIDE/app/src/AiGeneration/Studio/Roles.js",
-      "sha256": "dac71987229c63fcea55fabd049b43ab48beff68cb19813de9d1c77090c6798f"
+      "sha256": "1ebb998a8038a964151d28b5af6c4d4fdd4dffee2d563d0b83e9964ba13f8457"
     },
     "AiGeneration/Studio/SafeTruncation.js": {
       "bytes": 2743,

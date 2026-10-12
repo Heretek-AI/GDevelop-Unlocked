@@ -488,3 +488,100 @@ describe('integration: T03 tool manifest pruning (no dead tool calls)', () => {
     );
   });
 });
+
+describe('integration: T04 no-project self-remedy (null project)', () => {
+  it('project-dependent tools fail closed with the initialize_project remedy', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const src = readFileSync(
+      resolve(root, 'packages/ai-studio/AI/CustomAIClient.js'),
+      'utf8'
+    );
+    // Deterministic self-remedying error text (exact match on the contract).
+    assert.ok(src.includes('NO_PROJECT_MESSAGE'), 'NO_PROJECT_MESSAGE export missing');
+    assert.ok(
+      src.includes("No project is currently open. You must call initialize_project(template_slug:'empty')"),
+      'no-project remedy text missing or reworded'
+    );
+    assert.ok(src.includes('isProjectDependentTool'), 'isProjectDependentTool helper missing');
+    assert.ok(src.includes('buildNoProjectResult'), 'buildNoProjectResult helper missing');
+    assert.ok(src.includes('PROJECT_FREE_TOOL_NAMES'), 'PROJECT_FREE_TOOL_NAMES missing');
+    const helperAt = src.indexOf('export const buildNoProjectResult');
+    assert.ok(helperAt !== -1, 'buildNoProjectResult export missing');
+    const helperSlice = src.slice(helperAt, helperAt + 2000);
+    assert.ok(helperSlice.includes('success: false'), 'no-project result must be success:false');
+    assert.ok(helperSlice.includes('noProject: true'), 'no-project result must set noProject:true');
+    assert.ok(!helperSlice.includes('fetch('), 'no-project result must not fetch');
+    // initialize_project itself is never project-dependent (it IS the remedy).
+    const freeAt = src.indexOf('PROJECT_FREE_TOOL_NAMES');
+    const freeSlice = src.slice(freeAt, freeAt + 1200);
+    assert.ok(freeSlice.includes("'initialize_project'"), 'initialize_project must be project-free');
+    // System prompt states the remedy when no project JSON is present.
+    assert.ok(
+      src.includes("No project is currently open. You must call initialize_project(template_slug:'empty') to create one before using project tools."),
+      'buildSystemPrompt must state the no-project remedy'
+    );
+  });
+
+  it('manager role leads with initialize_project when no project is open', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const roles = readFileSync(
+      resolve(root, 'packages/ai-studio/AiGeneration/Studio/Roles.js'),
+      'utf8'
+    );
+    const managerAt = roles.indexOf('manager: {');
+    assert.ok(managerAt !== -1, 'manager role missing');
+    const managerSlice = roles.slice(managerAt, managerAt + 4000);
+    // initialize_project prominent: first in the manager tool manifest.
+    const initAt = managerSlice.indexOf("'initialize_project'");
+    assert.ok(initAt !== -1, 'initialize_project missing from manager allowedToolNames');
+    const planAt = managerSlice.indexOf("'create_or_update_plan'");
+    assert.ok(planAt !== -1, 'manager plan tool missing');
+    assert.ok(
+      initAt < planAt,
+      'initialize_project must precede create_or_update_plan in the manager manifest (prominent)'
+    );
+    // First-action rule in the manager prompt.
+    assert.ok(
+      managerSlice.includes('your first action must be initialize_project'),
+      'manager prompt must order initialize_project first when no project is open'
+    );
+  });
+
+  it('patch 14 routes null-project calls to the self-remedy before the editor', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const patch14 = readFileSync(resolve(root, 'patches/14-ai-utils.patch'), 'utf8');
+    for (const marker of [
+      'noProjectHandledCallIds',
+      'noProjectResults',
+      'isProjectDependentTool',
+      'NO_PROJECT_MESSAGE',
+    ]) {
+      assert.ok(patch14.includes(marker), `patch 14 missing T04 marker: ${marker}`);
+    }
+    assert.ok(
+      patch14.includes('isCustomEndpointEnabled() && !project'),
+      'no-project pre-pass must gate on !project under BYOK'
+    );
+    assert.ok(
+      patch14.includes('!noProjectHandledCallIds.has(functionCall.call_id)'),
+      'no-project calls must be excluded from the editor dispatch'
+    );
+    assert.ok(
+      patch14.includes('...noProjectResults,'),
+      'no-project results must be sent to the model'
+    );
+    const preAt = patch14.indexOf('T04 (#21)');
+    assert.ok(preAt !== -1, 'T04 pre-pass comment missing');
+    const preSlice = patch14.slice(preAt, preAt + 4000);
+    assert.ok(!preSlice.includes('fetch('), 'no-project pre-pass must not fetch');
+  });
+});

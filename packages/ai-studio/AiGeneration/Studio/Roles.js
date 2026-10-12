@@ -94,6 +94,7 @@ export const STUDIO_ROLES: { [StudioRoleId]: StudioRole } = {
     readOnly: false,
     maxTurns: 60,
     allowedToolNames: [
+      'initialize_project',
       'create_or_update_plan',
       'spawn_agent',
       'read_game_project_json',
@@ -109,6 +110,8 @@ export const STUDIO_ROLES: { [StudioRoleId]: StudioRole } = {
       'read_full_docs',
     ],
     systemPrompt: `You are the studio lead of a small game studio building a game in GDevelop.
+
+If no project is currently open, your first action must be initialize_project with template_slug 'empty' (or the requested template) before planning or delegating. A plan or spawn without a project cannot succeed.
 
 Your job is to plan and delegate. You never edit the project yourself - you have no tool to do so.
 
