@@ -619,6 +619,15 @@ describe('integration: T05 suspended UI and resume (terminal status card)', () =
     assert.ok(resumeSlice.includes("status: 'ready'"), 'resume must reset status to ready');
     assert.ok(resumeSlice.includes('error: null'), 'resume must clear the error');
     assert.ok(resumeSlice.includes('buildResumeSteerMessage'), 'resume must attach the steer prompt');
+    // #31: the steer message content must be the AiRequestUserMessage array
+    // shape ({type:'user_request', status:'completed', text}) — the chat
+    // message list maps/filters over message.content, and a bare string
+    // crashed the renderer (s.content.map is not a function).
+    assert.ok(resumeSlice.includes("type: 'user_request'"), 'resume steer must use the user_request item shape');
+    assert.ok(
+      !resumeSlice.includes('content: buildResumeSteerMessage(reason),'),
+      'resume steer must not use bare string content'
+    );
     // Clear Stalled purges exactly gd-custom-ai-requests.
     assert.ok(
       src.includes("gd-custom-ai-requests"),

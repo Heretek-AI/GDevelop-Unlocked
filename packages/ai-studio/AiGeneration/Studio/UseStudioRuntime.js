@@ -86,7 +86,17 @@ export const buildResumeUpdate = (aiRequest: any): any => {
           {
             type: 'message',
             role: 'user',
-            content: buildResumeSteerMessage(reason),
+            // Array item shape, matching AiRequestUserMessage: the chat
+            // message list maps/filter over message.content (#31: a bare
+            // string here crashed the renderer with
+            // "s.content.map is not a function").
+            content: [
+              {
+                type: 'user_request',
+                status: 'completed',
+                text: buildResumeSteerMessage(reason),
+              },
+            ],
             messageId: `resume-steer-${Date.now()}`,
           },
         ]
