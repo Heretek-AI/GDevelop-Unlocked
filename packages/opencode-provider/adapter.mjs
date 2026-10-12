@@ -259,3 +259,68 @@ export function chunkTextForStream(text, maxChunk = 24) {
   if (current.length > 0) chunks.push(current);
   return chunks.length > 0 ? chunks : [''];
 }
+
+/**
+ * Extract YaRN / context scaling parameters from request headers.
+ * Supports LiteLLM, vLLM, Ollama, and local gateway conventions.
+ */
+export function extractYaRNScalingHeaders(headers = {}) {
+  const normalized = {};
+  for (const [k, v] of Object.entries(headers)) {
+    normalized[k.toLowerCase()] = v;
+  }
+
+  const yarnScale = parseFloat(normalized['x-yarn-scale'] || '1.0');
+  const ropeFactor = parseFloat(normalized['x-rope-scaling-factor'] || '1.0');
+  const contextWindow = parseInt(
+    normalized['x-context-window'] || normalized['x-litellm-model-context-size'] || '0',
+    10
+  );
+
+  return {
+    yarnScale: Number.isFinite(yarnScale) && yarnScale > 0 ? yarnScale : 1.0,
+    ropeFactor: Number.isFinite(ropeFactor) && ropeFactor > 0 ? ropeFactor : 1.0,
+    contextWindow: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : 0,
+  };
+}
+
+/**
+ * Context window guardrails for local inference models.
+ * Warns and computes truncation budget when messages approach the token capacity.
+ */
+export function buildContextWindowGuardrail({
+  messages = [],
+  maxContext = 8192,
+  reservedForOutput = 2048,
+  yarnScale = 1.0,
+} = {}) {
+  let promptTokens = 0;
+  for (const msg of messages) {
+    if (!msg) continue;
+    if (typeof msg.content === 'string') {
+      promptTokens += estimateTokens(msg.content);
+    } else if (Array.isArray(msg.content)) {
+      for (const part of msg.content) {
+        if (part && typeof part.text === 'string') {
+          promptTokens += estimateTokens(part.text);
+        }
+      }
+    }
+  }
+
+  const effectiveContext = Math.floor(maxContext * yarnScale);
+  const availableForPrompt = Math.max(0, effectiveContext - reservedForOutput);
+  const approachingLimit = promptTokens > Math.floor(availableForPrompt * 0.85);
+  const exceedsLimit = promptTokens > availableForPrompt;
+
+  return {
+    promptTokens,
+    maxContext,
+    yarnScale,
+    effectiveContext,
+    availableForPrompt,
+    approachingLimit,
+    exceedsLimit,
+    overflowTokens: Math.max(0, promptTokens - availableForPrompt),
+  };
+}

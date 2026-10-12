@@ -288,3 +288,60 @@ export const GDEVELOP_TOOLS = [
 
 /** Registration-order tool names. */
 export const TOOL_NAMES = GDEVELOP_TOOLS.map(tool => tool.name);
+
+/** Agnostic Harness Adapter: convert to OpenAI function calling format. */
+export function toOpenAiTool(tool) {
+  return {
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.input,
+    },
+  };
+}
+
+/** Agnostic Harness Adapter: convert to Anthropic tool use format. */
+export function toAnthropicTool(tool) {
+  return {
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.input,
+  };
+}
+
+/** Agnostic Harness Adapter: convert to Model Context Protocol (MCP) tool format. */
+export function toMcpTool(tool) {
+  return {
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.input,
+  };
+}
+
+/** Agnostic Harness Adapter: convert to OpenCode plugin format. */
+export function toOpenCodeTool(tool) {
+  return {
+    name: tool.name,
+    description: tool.description,
+    input: tool.input,
+    execute: tool.execute,
+  };
+}
+
+/** Export all 6 tools formatted for the specified agent harness. */
+export function exportAllTools(format = 'openai') {
+  switch (format) {
+    case 'openai':
+      return GDEVELOP_TOOLS.map(toOpenAiTool);
+    case 'anthropic':
+    case 'claude':
+      return GDEVELOP_TOOLS.map(toAnthropicTool);
+    case 'mcp':
+      return GDEVELOP_TOOLS.map(toMcpTool);
+    case 'opencode':
+      return GDEVELOP_TOOLS.map(toOpenCodeTool);
+    default:
+      throw new Error(`[opencode-gdevelop] unsupported tool format: "${format}"`);
+  }
+}

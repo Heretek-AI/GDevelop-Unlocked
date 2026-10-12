@@ -52,13 +52,14 @@ commit. Nothing else external is needed — this repo is fork-independent.
 - `packages/ai-studio/` — extracted Tier-2 runtime + `dev-harness/` mock provider
 - `packages/unlock-shim/` — routing/leak-guard invariants (reference impl)
 - `packages/opencode-provider/` — local OpenAI-compatible daemon
-  (`node packages/opencode-provider/cli.mjs [--port 0]`); target it from
-  Preferences → AI Settings for BYOK
+  (`node packages/opencode-provider/cli.mjs [--port 0]`) and MCP STDIO server
+  (`node packages/opencode-provider/mcp-server.mjs`); target from Preferences → AI Settings or MCP clients
 - `packages/opencode-gdevelop/` — OpenCode plugin (`index.mjs`, id
-  `gdevelop`): six `gdevelop_*` tools + `gdevelop-architect` persona, zero
+  `gdevelop`): six `gdevelop_*` tools with cross-harness format export (OpenAI, Anthropic, MCP, OpenCode) + `gdevelop-architect` persona, zero
   deps, zero egress (see its README)
+- `Formula/` — `gdevelop-unlocked.rb` standalone Homebrew formula for Linuxbrew
 - `tests/` — `seams/`, `patches/`, `launcher/`, `tier2/`, `web/`, `integration/`, `e2e/`
-- `docs/` — `upstream-ai-provider-rfc.md` and friends
+- `docs/` — `upstream-ai-provider-rfc.md`, `release-signing.md`, and friends
 - `web-userscript/` — web-editor demo userscript (not a delivery path)
 
 ## CI
@@ -77,5 +78,5 @@ commit. Nothing else external is needed — this repo is fork-independent.
   donor pin; `tests/patches/pins.test.mjs` keeps the workflows on it)
 - Retirement plan for the donor fork: `RETIREMENT.md`
 - Latest audit verdict: **conditional PASS** (`AUDIT_REPORT.md` §10) —
-  213/213 + 5/5 e2e green, rebase gate clean at the pin; remaining work
+  235/235 + 5/5 e2e green, rebase gate clean at the pin; remaining work
   is live CI/model/browser proof, not code changes.

@@ -6,9 +6,11 @@
   "type": "module",
   "description": "Local OpenAI-compatible provider bridge for GDevelop (offline daemon, zero egress).",
   "bin": {
-    "opencode-provider": "./cli.mjs"
+    "opencode-provider": "./cli.mjs",
+    "opencode-mcp": "./mcp-server.mjs"
   },
   "scripts": {
-    "start": "node ./cli.mjs"
+    "start": "node ./cli.mjs",
+    "mcp": "node ./mcp-server.mjs"
   }
 }

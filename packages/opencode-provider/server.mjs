@@ -24,6 +24,8 @@ import {
   openAiMessagesToSession,
   buildUsage,
   chunkTextForStream,
+  extractYaRNScalingHeaders,
+  buildContextWindowGuardrail,
 } from './adapter.mjs';
 
 export const OPENAI_MODEL_ID = 'gdevelop-local';
@@ -1526,7 +1528,10 @@ export const EDITOR_TOOLS = [
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type, authorization',
+  'Access-Control-Allow-Headers':
+    'content-type, authorization, x-yarn-scale, x-rope-scaling-factor, x-context-window, x-litellm-model-context-size',
+  'Access-Control-Expose-Headers':
+    'x-context-window-remaining, x-yarn-active',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -1536,12 +1541,13 @@ const errorPayload = (message, code = 'invalid_request_error') => ({
   error: { message, type: 'invalid_request_error', code },
 });
 
-function sendJson(res, status, payload) {
+function sendJson(res, status, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Content-Length': Buffer.byteLength(body),
     ...CORS_HEADERS,
+    ...extraHeaders,
   });
   res.end(body);
 }
@@ -1609,12 +1615,13 @@ function buildEchoContent(session) {
     : `[${OPENAI_MODEL_ID}] echo: empty prompt`;
 }
 
-function writeSseResponse(res, { model, sessionId, content, toolCalls }) {
+function writeSseResponse(res, { model, sessionId, content, toolCalls, extraHeaders = {} }) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
     ...CORS_HEADERS,
+    ...extraHeaders,
   });
   let alive = true;
   res.on('close', () => {
@@ -1710,8 +1717,22 @@ function handleChatCompletions(req, res, { model }) {
         session.prompt,
         toolCalls.length > 0 ? toolCalls[0].function.arguments : content
       );
+      const yarnParams = extractYaRNScalingHeaders(req.headers);
+      const guardrail = buildContextWindowGuardrail({
+        messages,
+        maxContext: yarnParams.contextWindow || 8192,
+        yarnScale: yarnParams.yarnScale,
+      });
+      const extraHeaders = {
+        'X-Context-Window-Remaining': String(
+          Math.max(0, guardrail.availableForPrompt - guardrail.promptTokens)
+        ),
+        'X-YaRN-Active': String(
+          yarnParams.yarnScale !== 1.0 || yarnParams.ropeFactor !== 1.0
+        ),
+      };
       if (stream === true) {
-        writeSseResponse(res, { model, sessionId, content, toolCalls });
+        writeSseResponse(res, { model, sessionId, content, toolCalls, extraHeaders });
         return;
       }
       const finish_reason = toolCalls.length > 0 ? 'tool_calls' : 'stop';
@@ -1732,7 +1753,7 @@ function handleChatCompletions(req, res, { model }) {
           },
         ],
         usage,
-      });
+      }, extraHeaders);
     } catch (err) {
       sendJson(res, 400, errorPayload(err.message));
     }

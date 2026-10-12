@@ -209,8 +209,13 @@ function safeConsoleArg(value) {
   try {
     if (value instanceof Error)
       return { error: value.message, stack: String(value.stack).slice(0, 500) };
-    if (value && typeof value === 'object')
-      return JSON.parse(JSON.stringify(value));
+    if (value && typeof value === 'object') {
+      return JSON.parse(JSON.stringify(value), function sanitizeKey(k, v) {
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype')
+          return undefined;
+        return v;
+      });
+    }
     if (typeof value === 'function') return '[function]';
     if (typeof value === 'undefined') return '[undefined]';
     return value;
@@ -350,6 +355,24 @@ function installRendererHook(scope) {
     } catch (error) {
       // Leave the original XHR alone rather than breaking networking.
     }
+  }
+  try {
+    if (
+      scope &&
+      scope.contextBridge &&
+      typeof scope.contextBridge.exposeInMainWorld === 'function' &&
+      typeof process !== 'undefined' &&
+      process &&
+      process.contextIsolated
+    ) {
+      scope.contextBridge.exposeInMainWorld('__HERETEK__', {
+        unlocked: true,
+        planId: 'gdevelop_startup',
+        source: 'context-bridge',
+      });
+    }
+  } catch (error) {
+    // Context bridge fallback is best-effort.
   }
   return scope.__HERETEK__;
 }
