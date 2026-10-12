@@ -2,6 +2,7 @@
   "name": "gdevelop-unlocked",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Surgical conversion of the GDevelop-Heretek fork: Tier-1 patcher + launcher hook, Tier-2 AI Studio package.",
   "scripts": {
