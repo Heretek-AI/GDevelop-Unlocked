@@ -26,9 +26,9 @@
       "sha256": "708de36210d000af56e795280eaa5dd450e32cedb4a54b7b031353a6cc4a679f"
     },
     "AiGeneration/Studio/LoopGuard.js": {
-      "bytes": 10420,
+      "bytes": 11296,
       "origin": "newIDE/app/src/AiGeneration/Studio/LoopGuard.js",
-      "sha256": "09bde299559edc5b9c5f74d7605c7c4ef8ba0eeb4f044168171183f51676b86d"
+      "sha256": "8fd346b75556051e7f03a15066ab562168f2028d5fca028583d9e7449be9b1ee"
     },
     "AiGeneration/Studio/NudgePolicy.js": {
       "bytes": 3821,

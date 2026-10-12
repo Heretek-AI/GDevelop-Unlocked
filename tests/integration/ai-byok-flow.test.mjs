@@ -690,3 +690,98 @@ describe('integration: T05 suspended UI and resume (terminal status card)', () =
     }
   });
 });
+
+describe('integration: T06 storm guard isolation (child failure never suspends parent)', () => {
+  it('LoopGuard is single-request with repeat-without-progress isolation', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const src = readFileSync(
+      resolve(root, 'packages/ai-studio/AiGeneration/Studio/LoopGuard.js'),
+      'utf8'
+    );
+    assert.ok(src.includes('LOOP_GUARD_SCOPE'), 'LOOP_GUARD_SCOPE marker missing');
+    assert.ok(src.includes("'single-request'"), 'guard scope must be single-request');
+    assert.ok(src.includes('maxTurnsWithoutProgress'), 'repeat-without-progress trip missing');
+    assert.ok(
+      src.includes("child") || src.includes('parent'),
+      'isolation note must name child/parent separation'
+    );
+  });
+
+  it('child spawn startup failure fails only its tool call (success:false, no parent suspend)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const patch14 = readFileSync(resolve(root, 'patches/14-ai-utils.patch'), 'utf8');
+    // Failure shape: failed tool call the model sees.
+    assert.ok(
+      patch14.includes('The sub-agent could not be started.'),
+      'spawn startup failure message missing'
+    );
+    // Isolation markers.
+    for (const marker of ['T06 (#23)', 'editorCallIds', 'spawnFailureResults']) {
+      assert.ok(patch14.includes(marker), `patch 14 missing T06 marker: ${marker}`);
+    }
+    // Parent guard feeds ONLY editor-dispatched calls — never spawn/local failures.
+    assert.ok(
+      patch14.includes('if (!editorCallIds.has(result.call_id)) return;'),
+      'parent guard must skip non-editor (child/local) results'
+    );
+    // The spawn failure path never suspends or constrains the parent.
+    const spawnAt = patch14.indexOf('The sub-agent could not be started.');
+    assert.ok(spawnAt !== -1, 'spawn failure site missing');
+    const spawnSlice = patch14.slice(Math.max(0, spawnAt - 2000), spawnAt + 2000);
+    assert.ok(!spawnSlice.includes('suspendAiRequest'), 'spawn failure must not suspend the parent');
+    assert.ok(!spawnSlice.includes("status: 'error'"), 'spawn failure must not mark the parent error');
+    assert.ok(!spawnSlice.includes('guard.recordError'), 'spawn failure must not touch the parent streak');
+    // Parent stays alive: the failure is recorded AND sent as a normal tool error.
+    assert.ok(
+      patch14.includes('spawnFailureResults.push(failure)'),
+      'spawn failure must be pushed as a tool result'
+    );
+    assert.ok(
+      patch14.includes('...spawnFailureResults,'),
+      'spawn failures must be sent to the model for serial fallback'
+    );
+  });
+
+  it('patch 14 still dry-runs clean with isolation (real I/O, anti-revert intact)', async () => {
+    const { spawnSync } = await import('node:child_process');
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const root = path.dirname(
+      path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+    );
+    const upstream =
+      process.env.UPSTREAM_DIR || path.join(root, 'review', 'GDevelop');
+    const rel = 'newIDE/app/src/AiGeneration/Utils.js';
+    assert.ok(
+      fs.existsSync(path.join(upstream, rel)),
+      `missing fixture ${rel} (set UPSTREAM_DIR)`
+    );
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 't06-p14-'));
+    try {
+      const dest = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(path.join(upstream, rel), dest);
+      const r = spawnSync(
+        'patch',
+        ['-p1', '-s', '--dry-run', '-i', path.join(root, 'patches/14-ai-utils.patch')],
+        { cwd: dir, encoding: 'utf8' }
+      );
+      assert.equal(r.status, 0, `patch 14 dry-run failed:\n${r.stdout}\n${r.stderr}`);
+      const patchText = fs.readFileSync(path.join(root, 'patches/14-ai-utils.patch'), 'utf8');
+      assert.ok(
+        !/^-[^-].*onSaveProjectAsWithStorageProvider/m.test(patchText),
+        'patch 14 deletes upstream-new symbol onSaveProjectAsWithStorageProvider'
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
