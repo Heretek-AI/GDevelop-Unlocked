@@ -38,16 +38,21 @@
  } from './AiRequestUtils';
  import { type EditorFunctionCallResult } from '../EditorFunctions';
  import { useStableUpToDateRef } from '../Utils/UseStableUpToDateCallback';
-@@ -77,6 +93,8 @@
+@@ -77,6 +93,13 @@
  import UrlStorageProvider from '../ProjectsStorage/UrlStorageProvider';
  import { prepareAiUserContent } from './PrepareAiUserContent';
  import { AiRequestContext } from './AiRequestContext';
 +import { useStudioRuntime } from './Studio/UseStudioRuntime';
++import {
++  getTerminalStatusForRequest,
++  buildResumeUpdate,
++  clearStalledRequests,
++} from './Studio/UseStudioRuntime';
 +import { useStudioNudge } from './Studio/UseStudioNudge';
  import { getAiConfigurationPresetsWithAvailability } from './AiConfiguration';
  import {
    setEditorHotReloadNeeded,
-@@ -555,6 +573,7 @@
+@@ -555,6 +578,7 @@
          requestEditApproval,
          resolveEditApproval,
          setIsFetchingSuggestions,
@@ -55,7 +60,7 @@
        } = React.useContext(AiRequestContext);
        const {
          getEditorFunctionCallResults,
-@@ -580,13 +599,27 @@
+@@ -580,13 +604,27 @@
        const authenticatedUser = React.useContext(AuthenticatedUserContext);
        const {
          profile,
@@ -84,7 +89,7 @@
        const { isRefreshingLimits, refreshLimits } = useRefreshLimits(
          onRefreshLimits
        );
-@@ -594,13 +627,13 @@
+@@ -594,13 +632,13 @@
          false
        );
  
@@ -102,7 +107,7 @@
        const aiRequestPriceInCredits = aiRequestPrice
          ? aiRequestPrice.priceInCredits
          : null;
-@@ -625,12 +658,14 @@
+@@ -625,12 +663,14 @@
              if (!newAiRequestOptions) return;
              console.info('Starting a new AI request...');
  
@@ -118,7 +123,7 @@
              // Read the options and reset them (to avoid launching the same request twice).
              const {
                mode,
-@@ -643,13 +678,21 @@
+@@ -643,13 +683,21 @@
              // Ensure the user has enough credits to pay for the request, or ask them
              // to buy some more.
              let payWithCredits = false;
@@ -143,7 +148,7 @@
                  quota,
                  price: aiRequestPrice,
                  availableCredits,
-@@ -680,7 +723,7 @@
+@@ -680,7 +728,7 @@
  
                const preparedAiUserContent = await prepareAiUserContent({
                  getAuthorizationHeader,
@@ -152,7 +157,7 @@
                  simplifiedProjectJson,
                  projectSpecificExtensionsSummaryJson,
                  eventsJson: null,
-@@ -689,7 +732,7 @@
+@@ -689,7 +737,7 @@
                const aiRequest = await createAiRequest(getAuthorizationHeader, {
                  userRequest: userRequest,
                  attachmentIds,
@@ -161,7 +166,7 @@
                  gameProjectJsonUserRelativeKey:
                    preparedAiUserContent.gameProjectJsonUserRelativeKey,
                  gameProjectJson: preparedAiUserContent.gameProjectJson,
-@@ -709,7 +752,6 @@
+@@ -709,7 +757,6 @@
                  },
                });
  
@@ -169,7 +174,7 @@
                setSendingAiRequest(null, false);
                setIsSendingUserMessage(false);
                updateAiRequest(aiRequest.id, () => aiRequest);
-@@ -720,24 +762,39 @@
+@@ -720,24 +767,39 @@
                  setSelectedAiRequestId(aiRequest.id);
                }
  
@@ -226,7 +231,7 @@
              } catch (error) {
                console.error('Error starting a new AI request:', error);
                setLastSendError(null, error);
-@@ -794,12 +851,28 @@
+@@ -794,12 +856,28 @@
            createdProject?: ?gdProject,
            editorFunctionCallResults: Array<EditorFunctionCallResult>,
          |}) => {
@@ -257,7 +262,7 @@
            if (!aiRequestForMessage) return;
  
            if (isSendingAiRequest(aiRequestId)) {
-@@ -830,17 +903,19 @@
+@@ -830,17 +908,19 @@
              console.info(
                'Skipping send for AI request: some function call results are not finished yet.'
              );
@@ -280,7 +285,7 @@
  
            // Paying with credits is only when a user message is sent (and quota is exhausted).
            let payWithCredits = false;
-@@ -848,13 +923,17 @@
+@@ -848,13 +928,17 @@
              hasUserMessage &&
              quota &&
              quota.limitReached &&
@@ -300,7 +305,7 @@
                  quota,
                  price: aiRequestPrice,
                  availableCredits,
-@@ -865,6 +944,7 @@
+@@ -865,6 +949,7 @@
              }
            }
  
@@ -308,7 +313,7 @@
            try {
              setSendingAiRequest(aiRequestId, true);
              // Sending takes over the UI: drop any in-flight best-effort
-@@ -894,7 +974,7 @@
+@@ -894,7 +979,7 @@
  
              const preparedAiUserContent = await prepareAiUserContent({
                getAuthorizationHeader,
@@ -317,7 +322,7 @@
                simplifiedProjectJson,
                projectSpecificExtensionsSummaryJson,
                eventsJson: null,
-@@ -926,9 +1006,9 @@
+@@ -926,9 +1011,9 @@
                    })
                  : { functionCallOutputs, newlyGivenErrorIds: [] };
  
@@ -329,7 +334,7 @@
                  aiRequestId,
                  functionCallOutputs: functionCallOutputsToSend,
                  gameProjectJsonUserRelativeKey:
-@@ -961,26 +1041,43 @@
+@@ -961,26 +1046,43 @@
              );
              setSendingAiRequest(aiRequest.id, false);
              setIsSendingUserMessage(false);
@@ -388,7 +393,7 @@
                const aiRequestChatRefCurrent = aiRequestChatRef.current;
                if (aiRequestChatRefCurrent) {
                  aiRequestChatRefCurrent.resetUserInput('');
-@@ -989,7 +1086,6 @@
+@@ -989,7 +1091,6 @@
              }
            } catch (error) {
              console.error('Error while sending AI request message:', error);
@@ -396,7 +401,7 @@
              setLastSendError(aiRequestId, error);
              setIsSendingUserMessage(false);
            }
-@@ -1016,6 +1112,7 @@
+@@ -1016,6 +1117,7 @@
                onOpenExternalLayout(externalLayoutName);
              });
            }
@@ -404,7 +409,7 @@
          },
          [
            profile,
-@@ -1047,10 +1144,13 @@
+@@ -1047,10 +1149,13 @@
        // charges back the usage it refunded when the request failed).
        const onRetryAfterError = React.useCallback(
          async () => {
@@ -420,7 +425,7 @@
                aiRequestId: selectedAiRequestId,
              });
              updateAiRequest(aiRequest.id, () => aiRequest);
-@@ -1081,7 +1181,7 @@
+@@ -1081,7 +1186,7 @@
              createdProject?: ?gdProject,
            |}
          ) => {
@@ -429,7 +434,7 @@
              aiRequestId,
              userMessage: '',
              createdProject: options.createdProject,
-@@ -1094,29 +1194,54 @@
+@@ -1094,29 +1199,54 @@
        );
  
        /**
@@ -488,7 +493,7 @@
        } = useProcessFunctionCalls({
          project,
          fileMetadata,
-@@ -1124,6 +1249,7 @@
+@@ -1124,6 +1254,7 @@
          editorCallbacks,
          aiRequestsToProcess,
          onSendEditorFunctionCallResults,
@@ -496,7 +501,7 @@
          getEditorFunctionCallResults,
          addEditorFunctionCallResults,
          onSceneEventsModifiedOutsideEditor,
-@@ -1146,6 +1272,33 @@
+@@ -1146,6 +1277,33 @@
          suspendAiRequest,
          requestEditApproval,
          onSaveProjectAsWithStorageProvider,
@@ -530,7 +535,7 @@
        });
  
        // Wrap onProcessFunctionCalls to bind the selected AI request for the chat UI.
-@@ -1284,11 +1437,11 @@
+@@ -1284,11 +1442,11 @@
            // $FlowFixMe[missing-local-annot]
            freeFormDetails
          ) => {
@@ -544,7 +549,7 @@
                  aiRequestId,
                  messageIndex,
                  feedback,
-@@ -1318,7 +1471,11 @@
+@@ -1318,7 +1476,11 @@
  
        const onStop = React.useCallback(
          async () => {
@@ -557,7 +562,7 @@
            if (!getHasWorkInProgress()) return;
            // Delegates to the provider so the suspend logic lives in a single
            // place and also works when triggered outside of this editor.
-@@ -1442,14 +1599,24 @@
+@@ -1442,14 +1604,24 @@
  
        // Do a full fetch when the tab is opened to ensure the UI starts with
        // up-to-date server state (e.g. request may have been suspended while
@@ -586,7 +591,7 @@
              })
            )
              .then(aiRequest => {
-@@ -1703,9 +1870,13 @@
+@@ -1703,9 +1875,13 @@
              setForkingState(null);
              await showAlert({
                title: t`Error`,
@@ -603,7 +608,58 @@
              });
            }
          },
-@@ -1795,7 +1966,9 @@
+@@ -1741,6 +1917,50 @@
+           />
+           <Paper square background="dark" style={styles.paper}>
+             <div style={styles.chatContainer}>
++              {(() => {
++                // T05 (#22): terminal status card. A suspended/errored local
++                // request replaces the spinner/disabled composer with its badge,
++                // exact reason, and timestamp. Resume clears the LoopGuard
++                // counters (reset on the next user message) and steers back to
++                // ready; Clear Stalled purges gd-custom-ai-requests.
++                const terminalStatus =
++                  selectedAiRequest &&
++                  getTerminalStatusForRequest(selectedAiRequest);
++                if (!terminalStatus) return null;
++                return (
++                  <div
++                    style={{
++                      margin: 8,
++                      padding: 12,
++                      border: '1px solid',
++                    }}
++                  >
++                    <div>{terminalStatus.badge}</div>
++                    <div>{terminalStatus.reason}</div>
++                    <div>{terminalStatus.timestamp}</div>
++                    <button
++                      onClick={() => {
++                        if (!selectedAiRequest) return;
++                        updateAiRequest(selectedAiRequest.id, currentRequest =>
++                          buildResumeUpdate(
++                            currentRequest || selectedAiRequest
++                          )
++                        );
++                        onRetryAfterError();
++                      }}
++                    >
++                      Resume/Retry
++                    </button>
++                    <button
++                      onClick={() => {
++                        clearStalledRequests();
++                      }}
++                    >
++                      Clear Stalled
++                    </button>
++                  </div>
++                );
++              })()}
+               <AiRequestChat
+                 aiConfigurationPresetsWithAvailability={getAiConfigurationPresetsWithAvailability(
+                   { limits, getAiSettings }
+@@ -1795,7 +2015,9 @@
                  lastSendError={getLastSendError(selectedAiRequestId)}
                  quota={quota}
                  increaseQuotaOffering={

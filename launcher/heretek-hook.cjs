@@ -34,6 +34,52 @@ const {
   getRendererFallbackSource,
 } = require('./preload-unlock.cjs');
 
+// Optional: pre-T02 installs synced the hook without this file, so a
+// missing module disables debug logging instead of breaking the hook.
+let debugLoggerModule = null;
+try {
+  debugLoggerModule = require('./debug-logger.cjs');
+} catch (error) {
+  debugLoggerModule = null;
+}
+
+/** Structured file event; no-op unless an enabled debug logger is passed. */
+function debugLog(debug, level, event, data) {
+  try {
+    if (debug && debug.enabled && typeof debug.log === 'function')
+      return debug.log(level, event, data);
+  } catch (error) {
+    // Observability only — never break the hook.
+  }
+  return null;
+}
+
+/**
+ * Debug logger for this install: an explicitly passed `opts.debugLogger`
+ * wins, otherwise `--heretek-debug-log <path>` / `HERETEK_DEBUG_LOG`
+ * activates one. Null when off (all debugLog calls no-op).
+ */
+function resolveHookDebugLogger(opts) {
+  const options = opts || {};
+  if (
+    options.debugLogger &&
+    options.debugLogger.enabled &&
+    debugLoggerModule
+  )
+    return options.debugLogger;
+  if (!debugLoggerModule) return null;
+  const logPath = debugLoggerModule.resolveDebugLogPath({
+    argv: options.argv || process.argv,
+    env: process.env,
+  });
+  if (!logPath) return null;
+  const created = debugLoggerModule.createDebugLogger({
+    logPath,
+    source: 'main',
+  });
+  return created.enabled ? created : null;
+}
+
 // Absolute path so asar relocation cannot silently drop the hook.
 const PRELOAD_PATH = path.join(__dirname, 'preload-unlock.cjs');
 
@@ -136,7 +182,7 @@ function ensureRendererSeed(webContents, logger) {
     });
 }
 
-function watchWindowCreated(app, logger) {
+function watchWindowCreated(app, logger, debug) {
   if (!app || typeof app.on !== 'function') {
     if (logger)
       logger.error('[heretek] app.on missing — pop-out coverage disabled.');
@@ -144,14 +190,33 @@ function watchWindowCreated(app, logger) {
   }
   app.on('browser-window-created', (event, win) => {
     if (!win || !win.webContents) return;
+    debugLog(debug, 'info', 'window-created', {
+      hasWebContents: true,
+    });
+    if (typeof win.webContents.on === 'function') {
+      win.webContents.on('did-navigate', (navEvent, url) => {
+        debugLog(debug, 'info', 'window-did-navigate', { url });
+      });
+    }
     win.webContents.once('did-finish-load', () => {
+      debugLog(debug, 'info', 'window-did-finish-load', {});
       ensureRendererSeed(win.webContents, logger);
     });
   });
   return true;
 }
 
-function watchWebRequest(session, logger) {
+const HOSTED_API_HOST = 'api.gdevelop.io';
+
+function isHostedApiUrl(url) {
+  return (
+    typeof url === 'string' &&
+    (url.indexOf('https://' + HOSTED_API_HOST) === 0 ||
+      url.indexOf('http://' + HOSTED_API_HOST) === 0)
+  );
+}
+
+function watchWebRequest(session, logger, debug) {
   if (
     !session ||
     !session.webRequest ||
@@ -161,10 +226,49 @@ function watchWebRequest(session, logger) {
       logger.error('[heretek] webRequest unavailable — network fallback off.');
     return false;
   }
-  session.webRequest.onBeforeRequest(
-    { urls: [`${USAGE_API_BASE}/*`] },
-    (details, callback) => handleBeforeRequest(details, callback)
-  );
+  // With debug logging on, watch the whole hosted API surface (not just
+  // the spoofed usage paths) so any non-spoofed contact is flagged in the
+  // log — the zero-egress proof aid. Spoof behavior is unchanged:
+  // handleBeforeRequest still only redirects the two usage GETs.
+  const debugActive = !!(debug && debug.enabled);
+  const filter = debugActive
+    ? { urls: [`https://${HOSTED_API_HOST}/*`] }
+    : { urls: [`${USAGE_API_BASE}/*`] };
+  session.webRequest.onBeforeRequest(filter, (details, callback) => {
+    const url = details && details.url;
+    const method = (details && details.method) || 'GET';
+    if (debugActive && isHostedApiUrl(url)) {
+      if (shouldSpoofUrl(url, method)) {
+        debugLog(debug, 'debug', 'usage-spoofed', { url, method });
+      } else {
+        debugLog(debug, 'warn', 'hosted-api-attempt', { url, method });
+      }
+    }
+    handleBeforeRequest(details, callback);
+  });
+  return true;
+}
+
+/**
+ * Main-process crash observability: uncaught exceptions and unhandled
+ * rejections go to the debug log (when active) instead of vanishing.
+ * Armed at most once per debug logger; disabled loggers arm nothing.
+ */
+function watchUncaught(debug) {
+  if (!debug || !debug.enabled) return false;
+  if (debug.__heretekUncaughtArmed) return true;
+  debug.__heretekUncaughtArmed = true;
+  process.on('uncaughtException', error => {
+    debugLog(debug, 'error', 'uncaught-exception', {
+      message: error && error.message ? String(error.message) : String(error),
+      stack: error && error.stack ? String(error.stack).slice(0, 2000) : '',
+    });
+  });
+  process.on('unhandledRejection', reason => {
+    debugLog(debug, 'error', 'unhandled-rejection', {
+      reason: reason instanceof Error ? reason.message : String(reason),
+    });
+  });
   return true;
 }
 
@@ -238,6 +342,7 @@ function wrapBrowserWindow(electron, logger) {
 function installPreloadHook(electronModule, opts) {
   const options = opts || {};
   const logger = options.logger || console;
+  const debug = resolveHookDebugLogger(options);
   let electron = electronModule;
   if (!electron) {
     try {
@@ -249,14 +354,14 @@ function installPreloadHook(electronModule, opts) {
   }
   const wrapped = wrapBrowserWindow(electron, logger);
   const app = electron.app;
-  const windowsWatched = app && watchWindowCreated(app, logger);
+  const windowsWatched = app && watchWindowCreated(app, logger, debug);
   // Real Electron throws on `session.defaultSession` before app ready —
   // set up now when possible, otherwise retry once ready.
   let requestWatched = false;
   let webRequestDeferred = false;
   const setupWebRequest = () => {
     const session = electron.session && electron.session.defaultSession;
-    if (session) requestWatched = watchWebRequest(session, logger);
+    if (session) requestWatched = watchWebRequest(session, logger, debug);
   };
   try {
     setupWebRequest();
@@ -296,6 +401,17 @@ function installPreloadHook(electronModule, opts) {
       `${webRequestDeferred ? ' (deferred to app-ready)' : ''}, ` +
       `updater pin: ${!!updaterWatched}).`
   );
+  const uncaughtWatched = watchUncaught(debug);
+  const result = {
+    wrapped,
+    windowsWatched: !!windowsWatched,
+    requestWatched: !!requestWatched,
+    webRequestDeferred,
+    updaterWatched: !!updaterWatched,
+    debugEnabled: !!(debug && debug.enabled),
+    uncaughtWatched: !!uncaughtWatched,
+  };
+  debugLog(debug, 'info', 'hook-installed', result);
   try {
     armSmokeMode(electron, {
       logger,
@@ -304,13 +420,7 @@ function installPreloadHook(electronModule, opts) {
   } catch (error) {
     logger.error('[heretek] smoke arm failed:', error);
   }
-  return {
-    wrapped,
-    windowsWatched: !!windowsWatched,
-    requestWatched: !!requestWatched,
-    webRequestDeferred,
-    updaterWatched: !!updaterWatched,
-  };
+  return result;
 }
 
 /**
@@ -504,6 +614,7 @@ module.exports = {
   PRELOAD_PATH,
   SPOOFED_USAGE_URLS,
   UPDATER_PIN_MESSAGE,
+  HOSTED_API_HOST,
   withUnlockPreload,
   shouldSpoofUrl,
   buildSpoofRedirectUrl,
@@ -511,6 +622,7 @@ module.exports = {
   ensureRendererSeed,
   watchWindowCreated,
   watchWebRequest,
+  watchUncaught,
   watchUpdater,
   wrapBrowserWindow,
   installPreloadHook,

@@ -60,7 +60,7 @@ node scripts/apply-patches.mjs --target <upstream-checkout>
 ```
 
 Applies patch 06 (loader line at the top of `electron-app/app/main.js`)
-together with the rest of the stack, and copies the three `.cjs` files
+together with the rest of the stack, and copies the four `.cjs` files
 next to `main.js`. This is what `release.yml` builds from. Re-check an
 already-patched tree at any time, read-only:
 
@@ -80,7 +80,7 @@ npx --yes @electron/asar pack <workdir> <app>/resources/app.asar
 ```
 
 `inject-launcher.mjs` inserts the loader above the
-`const electron = require('electron');` anchor and syncs the three
+`const electron = require('electron');` anchor and syncs the four
 `.cjs` files. It is idempotent (a re-run is a verified no-op) and fails
 loudly if the anchor is gone. This is the path the `e2e` workflow's
 `tier1-smoke` job proves on every PR and every push to `main`/`develop`.
@@ -131,6 +131,26 @@ line and these files vanish on restart.
 
 Do not enable `autoUpdater.autoDownload = true` unattended on hooked
 builds: a silent overnight update silently drops Tier-1.
+
+## Client debug logging (T02)
+
+Off by default. Activate with `--heretek-debug-log <path>` or
+`HERETEK_DEBUG_LOG=<path>`; the main process then appends one JSON
+object per line (`{ts, iso, source, level, event, data}`) via
+`debug-logger.cjs` (sync writes, zero npm dependencies). An invalid
+path disables logging instead of crashing. Recorded: hook install,
+window creation / load / navigation, uncaught exceptions and unhandled
+rejections, spoofed usage GETs, and — at `warn` — any non-spoofed
+`api.gdevelop.io` attempt (the zero-egress proof aid). The renderer
+buffers its own events (console errors/warnings, `error` and
+`unhandledrejection`) on `window.__HERETEK_LOGGER__` (capped at 500),
+and the Studio guard emits `[AI_REQUEST_START]`, `[TOOL_CALL]`,
+`[TOOL_RESULT]`, `[GUARD_EVALUATE]`, `[REQUEST_STATE_CHANGE]` there when
+it exists. Inspect a log with:
+
+```bash
+node scripts/dump-debug-log.mjs <logfile> [--event N] [--level L] [--request ID] [--json]
+```
 
 ## Test doubles vs production
 

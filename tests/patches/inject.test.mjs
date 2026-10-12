@@ -31,7 +31,7 @@ describe('inject: extracted-asar layout', () => {
     assert.equal(findMainJs(dir), path.join(dir, 'main.js'));
     const r = injectIntoAppDir(dir);
     assert.equal(r.loaderAdded, true);
-    assert.deepEqual(r.filesSynced.length, 3);
+    assert.deepEqual(r.filesSynced.length, 4);
     const text = fs.readFileSync(path.join(dir, 'main.js'), 'utf8');
     assert.ok(
       text.indexOf("installPreloadHook()") <
@@ -41,6 +41,7 @@ describe('inject: extracted-asar layout', () => {
       'heretek-hook.cjs',
       'preload-unlock.cjs',
       'unlock-payloads.cjs',
+      'debug-logger.cjs',
     ]) {
       assert.equal(
         fs.readFileSync(path.join(dir, f), 'utf8'),

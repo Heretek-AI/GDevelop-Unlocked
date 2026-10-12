@@ -1,9 +1,19 @@
 // @flow
 
 import jsSHA from '../../Utils/Sha256';
+import { emitStudioDebugEvent } from './DebugEvents';
 
 /**
  * The local loop guard: a circuit breaker for a BYOK agent.
+ *
+ * Scope is strictly single-request (T06 #23): one guard instance per
+ * `aiRequest.id` (see `loopGuardsRef` in Utils.js), counting only that
+ * request's own turns — consecutive identical calls (repeat), consecutive
+ * failures (error storm), turns without user input, and turns without
+ * project progress (repeat-without-progress, sub-agents only). A child's
+ * startup failure never touches its parent's streak and never constrains
+ * the parent: `spawnSubAgent` failures fail only their own `spawn_agent`
+ * tool call (`success:false`) so the parent stays alive for serial fallback.
  *
  * Ported from munder-difflin's `src/main/breaker.ts`, narrowed to what this
  * editor can actually observe. Under BYOK there is no server, so nothing counts
@@ -42,6 +52,13 @@ export type LoopGuardDecision = {|
   /** True when the level changed since the previous `evaluate` (either way). */
   changed: boolean,
 |};
+
+/**
+ * T06 (#23) isolation scope marker: guards are per-request only. A test
+ * asserts this constant exists so the single-request + repeat-without-
+ * progress contract cannot silently regress to a shared/global guard.
+ */
+export const LOOP_GUARD_SCOPE: string = 'single-request';
 
 export const DEFAULT_LOOP_GUARD_CONFIG = {
   enabled: true,
@@ -199,13 +216,17 @@ export const createLoopGuard = (
         repeatKey = key;
         repeatCount = 1;
       }
+      // T02 debug event: the guard observes every tool call.
+      emitStudioDebugEvent('[TOOL_CALL]', { name: call.name, key });
     },
     recordSuccess: () => {
       // Only a real success clears the error storm: an attempt is not progress.
       errorCount = 0;
+      emitStudioDebugEvent('[TOOL_RESULT]', { ok: true });
     },
     recordError: () => {
       errorCount++;
+      emitStudioDebugEvent('[TOOL_RESULT]', { ok: false });
     },
     recordTurn: () => {
       turnCount++;
@@ -226,12 +247,20 @@ export const createLoopGuard = (
       turnCount = 0;
       noProgressTurns = 0;
       actionEmittedForTrip = false;
+      // T02 debug event: a new user input starts a fresh agent run.
+      emitStudioDebugEvent('[AI_REQUEST_START]', {});
     },
     evaluate: () => {
       if (!effectiveConfig.enabled) {
         const wasChanged = level !== 'healthy';
         level = 'healthy';
         reason = '';
+        emitStudioDebugEvent('[GUARD_EVALUATE]', {
+          level,
+          reason,
+          action: 'none',
+          changed: wasChanged,
+        });
         return {
           level,
           reason,
@@ -252,6 +281,7 @@ export const createLoopGuard = (
       }
       const changed = target !== level;
       const escalated = rank(target) > rank(level);
+      const previousLevel = level;
       level = target;
       reason = trip.tripping ? trip.reason : changed ? 'recovering' : reason;
 
@@ -265,10 +295,26 @@ export const createLoopGuard = (
         actionEmittedForTrip = false;
       }
 
+      const action = shouldEmit ? actionFor(target) : 'none';
+      // T02 debug events: every guard decision, plus a state-change record
+      // on level transitions.
+      emitStudioDebugEvent('[GUARD_EVALUATE]', {
+        level,
+        reason,
+        action,
+        changed,
+      });
+      if (changed) {
+        emitStudioDebugEvent('[REQUEST_STATE_CHANGE]', {
+          from: previousLevel,
+          to: level,
+        });
+      }
+
       return {
         level,
         reason,
-        action: shouldEmit ? actionFor(target) : 'none',
+        action,
         changed,
       };
     },

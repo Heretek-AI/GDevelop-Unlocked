@@ -1,0 +1,47 @@
+MIT License
+
+Copyright (c) 2026 Heretek-AI
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+SCOPE NOTE — what this license covers (and what it does not).
+
+1. This license covers the original files of this repository
+   (GDevelop-Unlocked): the patch stack and tooling under `patches/`,
+   `scripts/`, `launcher/`, `packages/`, `tests/`, `web-userscript/`,
+   `docs/`, and the repository's own documentation and workflows.
+   `package.json` names this same license (`"license": "MIT"`).
+
+2. Upstream GDevelop is NOT vendored in this repository. Release and
+   test flows apply the patch stack onto a stock upstream checkout
+   pinned in `UPSTREAM_BASELINE.json` (never committed under `review/`).
+   Upstream files remain under their own licenses: the Core library,
+   the game engine (GDJS), the new IDE, and all extensions (respectively
+   the `Core`, `GDJS`, `newIDE` and `Extensions` folders) are under the
+   MIT license; the name "GDevelop" and its logo are the exclusive
+   property of Florian Rival. See `LICENSE.md` in the upstream
+   checkout (root and per-folder) for the full texts. Verified against
+   upstream commit `8301cdcaa4` (see `UPSTREAM_BASELINE.json`).
+
+3. Files under `patches/` are transformation instructions (unified
+   diffs) that reference upstream files; they are this repository's
+   original work and are covered by this license. They do not reproduce
+   upstream sources.

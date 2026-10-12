@@ -22,6 +22,97 @@ import {
 } from './PlanStore';
 import { isSpawnAgentCall, parseSpawnAgentArgs } from './SpawnSubAgents';
 
+/**
+ * T05 (#22) terminal status card: when a local request ends in
+ * `suspended` (Stop / LoopGuard constrain) or `error`, the spinner and the
+ * disabled composer are replaced by a terminal card carrying the badge, the
+ * exact failure reason, and the timestamp — plus Resume/Retry (back to
+ * `ready` with a steer prompt; the LoopGuard counters reset on the next
+ * user message, see Utils.js) and Clear Stalled (purge the persisted
+ * `gd-custom-ai-requests` store).
+ */
+
+export const STALLED_REQUESTS_STORAGE_KEY: string = 'gd-custom-ai-requests';
+
+export type TerminalRequestStatus = {|
+  isTerminal: boolean,
+  badge: string,
+  reason: string,
+  timestamp: string,
+|};
+
+export const isTerminalRequestStatus = (status: string): boolean =>
+  status === 'suspended' || status === 'error';
+
+export const getTerminalStatusForRequest = (aiRequest: any): ?TerminalRequestStatus => {
+  if (!aiRequest || typeof aiRequest !== 'object') return null;
+  const status = aiRequest.status;
+  if (!isTerminalRequestStatus(status)) return null;
+  const error = aiRequest.error;
+  const reason =
+    error && typeof error.message === 'string' && error.message
+      ? error.message
+      : status === 'suspended'
+        ? 'The request was suspended.'
+        : 'The request failed.';
+  const badge =
+    status === 'suspended'
+      ? 'Suspended'
+      : /loop guard|stuck|repeated-tool-call-loop/i.test(reason)
+        ? 'Stopped by Loop Guard'
+        : 'Error';
+  const timestamp =
+    (typeof aiRequest.updatedAt === 'string' && aiRequest.updatedAt) ||
+    (typeof aiRequest.createdAt === 'string' && aiRequest.createdAt) ||
+    new Date().toISOString();
+  return { isTerminal: true, badge, reason, timestamp };
+};
+
+export const buildResumeSteerMessage = (reason: string): string =>
+  `The previous run stopped (${reason}). Resume with a different approach: do not repeat the last failing action, verify the project state first, then continue.`;
+
+export const buildResumeUpdate = (aiRequest: any): any => {
+  const now = new Date().toISOString();
+  const terminal = getTerminalStatusForRequest(aiRequest);
+  const reason = terminal ? terminal.reason : 'unknown reason';
+  return {
+    ...aiRequest,
+    status: 'ready',
+    error: null,
+    updatedAt: now,
+    output: Array.isArray(aiRequest.output)
+      ? [
+          ...aiRequest.output,
+          {
+            type: 'message',
+            role: 'user',
+            content: buildResumeSteerMessage(reason),
+            messageId: `resume-steer-${Date.now()}`,
+          },
+        ]
+      : aiRequest.output,
+  };
+};
+
+export const clearStalledRequests = (): number => {
+  try {
+    if (typeof localStorage === 'undefined') return 0;
+    const raw = localStorage.getItem(STALLED_REQUESTS_STORAGE_KEY);
+    const count =
+      raw != null
+        ? Object.keys(JSON.parse(raw) || {}).length
+        : 0;
+    localStorage.removeItem(STALLED_REQUESTS_STORAGE_KEY);
+    return typeof count === 'number' ? count : 0;
+  } catch (error) {
+    try {
+      if (typeof localStorage !== 'undefined')
+        localStorage.removeItem(STALLED_REQUESTS_STORAGE_KEY);
+    } catch (ignored) {}
+    return 0;
+  }
+};
+
 type ActiveSubAgent = {|
   parentAiRequestId: string,
   callId: string,

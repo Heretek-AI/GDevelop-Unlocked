@@ -1,14 +1,19 @@
 {
   "files": {
     "AI/CustomAIClient.js": {
-      "bytes": 208828,
+      "bytes": 212395,
       "origin": "newIDE/app/src/AI/CustomAIClient.js",
-      "sha256": "2dd976b936908115d08374851121a077d2b2b6c314a029a4bc52ab7125f51723"
+      "sha256": "28e24dde3cde3941f6ae514d415fcc5069ce2229f3d888e95aa767ebef7e22f1"
     },
     "AI/CustomAIClient.spec.js": {
       "bytes": 257794,
       "origin": "newIDE/app/src/AI/CustomAIClient.spec.js",
       "sha256": "0152072739b6590f004e886b8a5787cd769a529f044f14e48ca7e78ecc2a560a"
+    },
+    "AiGeneration/Studio/DebugEvents.js": {
+      "bytes": 1426,
+      "origin": "repo-original (T02 debug emitter, not a donor extraction)",
+      "sha256": "9e5e5a551f6655d5aeecc04cb1d0e6c04f13e820607fabfb5816b14b7219f76d"
     },
     "AiGeneration/Studio/EditApprovalLabel.js": {
       "bytes": 1308,
@@ -21,9 +26,9 @@
       "sha256": "708de36210d000af56e795280eaa5dd450e32cedb4a54b7b031353a6cc4a679f"
     },
     "AiGeneration/Studio/LoopGuard.js": {
-      "bytes": 9401,
+      "bytes": 11296,
       "origin": "newIDE/app/src/AiGeneration/Studio/LoopGuard.js",
-      "sha256": "0ad4c6f5d6312a38f56e0385b8408adec72634c95d7252a3ff193af1e667101e"
+      "sha256": "8fd346b75556051e7f03a15066ab562168f2028d5fca028583d9e7449be9b1ee"
     },
     "AiGeneration/Studio/NudgePolicy.js": {
       "bytes": 3821,
@@ -46,9 +51,9 @@
       "sha256": "66a7d577f12fccaa1b23d89bc7ba02c9bca07058358cc53d3ecfe50d604ef1b8"
     },
     "AiGeneration/Studio/Roles.js": {
-      "bytes": 12493,
+      "bytes": 12736,
       "origin": "newIDE/app/src/AiGeneration/Studio/Roles.js",
-      "sha256": "dac71987229c63fcea55fabd049b43ab48beff68cb19813de9d1c77090c6798f"
+      "sha256": "1ebb998a8038a964151d28b5af6c4d4fdd4dffee2d563d0b83e9964ba13f8457"
     },
     "AiGeneration/Studio/SafeTruncation.js": {
       "bytes": 2743,
@@ -66,9 +71,9 @@
       "sha256": "12df5f3f54a52e3c2c72646e6825360206eec0521dd6f15d73cd39660b21e0d2"
     },
     "AiGeneration/Studio/UseStudioRuntime.js": {
-      "bytes": 11187,
+      "bytes": 14337,
       "origin": "newIDE/app/src/AiGeneration/Studio/UseStudioRuntime.js",
-      "sha256": "ecc51b28d00baf1ccd7d38d542e4a9237cd145cd863586c6fae6e587d03564c3"
+      "sha256": "684f5f46c18f6b40dfadf01756ae62621e9c28a82d3a74a423bea61e09014cc3"
     },
     "dev-harness/mock-ai-provider.js": {
       "bytes": 9862,
@@ -97,5 +102,5 @@
       "sha256": "45c2915841b0a6c0f17db7a297a39ca1dfb8b889d74f018f87d1815cadf17c26"
     }
   },
-  "provenance": "Historical origin only: extracted in 2026-10 from the Heretek fork (now retired). This repo never reads the donor \u2014 integrity is self-contained via the pinned bytes/sha256 below."
+  "provenance": "Historical origin only: extracted in 2026-10 from the Heretek fork (now retired). This repo never reads the donor — integrity is self-contained via the pinned bytes/sha256 below."
 }

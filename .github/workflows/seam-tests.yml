@@ -34,3 +34,8 @@ jobs:
         run: npm test
       - name: Patcher gate (seams + patch inventory)
         run: node scripts/apply-patches.mjs --check
+      # Rebase drift gate (T12, #13): the full 14-patch stack must apply
+      # cleanly to a pristine archive copy of the pinned baseline. Runs
+      # after the suite so a red here names the drifting patch file.
+      - name: Rebase gate (clean apply against upstream HEAD)
+        run: node scripts/verify-upstream-rebase.mjs

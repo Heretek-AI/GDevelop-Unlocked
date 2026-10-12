@@ -2086,7 +2086,7 @@ export const GDEVELOP_OPENAI_TOOLS: Array<{|
     function: {
       name: 'search_docs',
       description:
-        'Search GDevelop documentation for functions, behaviors, and instructions.',
+        'Search GDevelop documentation for functions, behaviors, and instructions. [Offline in local BYOK mode: rely on internal GDevelop knowledge and on-project verification]',
       parameters: {
         type: 'object',
         properties: {
@@ -2101,7 +2101,7 @@ export const GDEVELOP_OPENAI_TOOLS: Array<{|
     function: {
       name: 'read_full_docs',
       description:
-        'Read full documentation for specific GDevelop extensions or features.',
+        'Read full documentation for specific GDevelop extensions or features. [Offline in local BYOK mode: rely on internal GDevelop knowledge and on-project verification]',
       parameters: {
         type: 'object',
         properties: {
@@ -3090,6 +3090,13 @@ Guidelines:
 
 `;
 
+  // T04 (#21): when no project JSON is present, no project is open. State the
+  // self-remedy explicitly so the model's first project-dependent call is
+  // `initialize_project` instead of a dead-end null failure.
+  if (!gameProjectJson) {
+    prompt += `\nNo project is currently open. You must call initialize_project(template_slug:'empty') to create one before using project tools.\n`;
+  }
+
   if (gameProjectJson) {
     prompt += `\nCurrent Project Structure:\n${gameProjectJson}\n`;
   }
@@ -3969,6 +3976,83 @@ const getToolsForStudioRequest = (
 export const BACKEND_ONLY_TOOL_NAMES: Array<string> = [
   'get_game_starter_summary',
 ];
+
+/**
+ * T03 (#24) offline docs tools: the hosted docs backend is unreachable in
+ * local BYOK mode. Their descriptions carry the offline suffix (above) and
+ * every local call fails closed immediately with no network lag — see
+ * `buildOfflineDocsResult` and the Utils.js pre-pass that routes them
+ * before the editor dispatch.
+ */
+export const OFFLINE_DOCS_SUFFIX: string =
+  ' [Offline in local BYOK mode: rely on internal GDevelop knowledge and on-project verification]';
+
+export const OFFLINE_DOCS_MESSAGE: string =
+  'Documentation backend is offline in local mode. Rely on internal GDevelop knowledge and verify against the open project.';
+
+export const OFFLINE_DOCS_TOOL_NAMES: Array<string> = [
+  'search_docs',
+  'read_full_docs',
+];
+
+export const isOfflineDocsTool = (toolName: string): boolean =>
+  OFFLINE_DOCS_TOOL_NAMES.includes(toolName);
+
+/**
+ * Fail-closed result for an offline docs call. Synchronous with no network
+ * I/O so a docs lookup can never stall a local turn.
+ */
+export const buildOfflineDocsResult = (toolName: string): Object => ({
+  success: false,
+  offline: true,
+  message: `${OFFLINE_DOCS_MESSAGE} (tool: ${toolName})`,
+});
+
+/**
+ * T03 (#24) local plan tool: `create_or_update_plan` is uncallable upstream
+ * (`EditorFunctions/index.js` fails it as "handled server-side"). Under BYOK
+ * it is routed to `Studio/PlanStore.js` (validate + merge over the request's
+ * existing plan) by the Utils.js pre-pass — never to the editor dispatch.
+ * Kept in `GDEVELOP_OPENAI_TOOLS` so the manager keeps planning; the pre-pass
+ * is what makes it a live tool instead of a dead one.
+ */
+export const LOCAL_PLAN_TOOL_NAMES: Array<string> = ['create_or_update_plan'];
+
+export const isLocalPlanTool = (toolName: string): boolean =>
+  LOCAL_PLAN_TOOL_NAMES.includes(toolName);
+
+/**
+ * T04 (#21) no-project self-remedy: project-dependent tools called with
+ * `project === null` (no project open) fail deterministically with a
+ * remedy the model can act on — calling `initialize_project` — instead of
+ * a dead-end null crash or a silent no-op. Routed by the Utils.js pre-pass
+ * before the editor dispatch; also surfaced in the system prompt when no
+ * project JSON is present.
+ */
+export const NO_PROJECT_MESSAGE: string =
+  "No project is currently open. You must call initialize_project(template_slug:'empty') to create one before using project tools.";
+
+export const PROJECT_FREE_TOOL_NAMES: Array<string> = [
+  'initialize_project',
+  'get_game_starter_summary',
+  'search_docs',
+  'read_full_docs',
+  'search_object_asset_store',
+  'search_resource_store',
+  'create_or_update_plan',
+  'spawn_agent',
+];
+
+export const isProjectDependentTool = (toolName: string): boolean =>
+  typeof toolName === 'string' &&
+  toolName.length > 0 &&
+  !PROJECT_FREE_TOOL_NAMES.includes(toolName);
+
+export const buildNoProjectResult = (toolName: string): Object => ({
+  success: false,
+  noProject: true,
+  message: `${NO_PROJECT_MESSAGE} (tool: ${toolName})`,
+});
 
 export const withoutBackendOnlyTools = (tools: Array<Object>): Array<Object> =>
   tools.filter(

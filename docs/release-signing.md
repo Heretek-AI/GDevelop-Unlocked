@@ -85,3 +85,42 @@ differently per OS:
    proven on a `publish=false` run before it matters.
 3. Treat options 2–5 as a deliberate owner decision, after the naming
    question above is settled.
+
+## CI runner health + pre-release drift gate (T12, issues #10 #13)
+
+Reviewed 2026-10-12 against `release.yml` / `seam-tests.yml` at the
+`8301cdcaa4` pin. No workflow changes needed for signing either way —
+this section records the confirmation so the next rebase does not
+re-derive it.
+
+- **Windows** (`build-windows`, `windows-latest`): builds **nsis + zip**
+  (`--win nsis zip --x64`), unsigned portable. Renderer/electron
+  `npm install` drops lockfiles per upstream's own Windows CI note
+  (`setuptools` for a native dep). Smoke-gated on the real `.exe`.
+- **macOS** (`build-macos`, `macos-latest`): builds the **universal**
+  `.app` (`--mac dir --universal`), ad-hoc signed only so the arm64
+  slice can launch, then ditto-zipped. Smoke-gated on the real binary.
+- **Pinning:** `actions/checkout@v4` + `actions/setup-node@v4`
+  (Node 22, matching `package.json` engines), `UPSTREAM_REF` default
+  equals the `UPSTREAM_BASELINE.json` pin, `GD_PORTABLE_BUILD=true`,
+  `REQUIRES_EXACT_LIBGD_JS_VERSION=true`. The `pins.test.mjs` suite
+  fails on a partial pin bump, so workflows and baseline cannot drift
+  apart silently.
+- **Signing-relevant gotcha (unchanged):** a future signed macOS job
+  must drop the ad-hoc `codesign --sign -` step (it would replace a
+  Developer ID signature) and verify with `codesign --verify --deep
+  --strict` + `spctl --assess` + `stapler validate` before upload —
+  see "What the build already supports" above.
+
+Pre-release drift check (run any time, changes nothing):
+
+```bash
+node scripts/verify-upstream-rebase.mjs   # UPSTREAM_DIR or review/GDevelop
+```
+
+It archives a pristine `newIDE/app/src + newIDE/electron-app` copy into
+TMPDIR scratch, runs the real driver (`--target`, dry-run-then-apply
+plus marker verify) and a read-only `--verify-only` second gate, then
+removes the scratch tree. Exit 0 names the clean upstream SHA; exit 1
+lists the failing patch file(s). CI runs the same script as the
+"Rebase gate" step of `seam-tests.yml` on every push/PR and weekly.

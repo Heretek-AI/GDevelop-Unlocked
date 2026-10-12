@@ -1,0 +1,8 @@
+{
+  "name": "@heretek-ai/opencode-gdevelop",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "OpenCode plugin for local GDevelop 5 project control (offline tools over the unlock control shim)."
+}
