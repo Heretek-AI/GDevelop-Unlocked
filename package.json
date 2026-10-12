@@ -6,12 +6,13 @@
   "type": "module",
   "description": "Surgical conversion of the GDevelop-Heretek fork: Tier-1 patcher + launcher hook, Tier-2 AI Studio package.",
   "scripts": {
-    "test": "node --test tests/seams/*.test.mjs tests/patches/*.test.mjs tests/launcher/*.test.cjs tests/tier2/*.test.mjs tests/web/*.test.mjs tests/integration/*.test.mjs",
+    "test": "node --test tests/seams/*.test.mjs tests/patches/*.test.mjs tests/launcher/*.test.cjs tests/tier2/*.test.mjs tests/web/*.test.mjs tests/unit/*.test.mjs tests/integration/*.test.mjs",
     "test:seams": "node --test tests/seams/*.test.mjs",
     "test:patches": "node --test tests/patches/*.test.mjs",
     "test:launcher": "node --test tests/launcher/*.test.cjs",
     "test:tier2": "node --test tests/tier2/*.test.mjs",
     "test:web": "node --test tests/web/*.test.mjs",
+    "test:unit": "node --test tests/unit/*.test.mjs",
     "test:integration": "node --test tests/integration/*.test.mjs",
     "patches:check": "node scripts/apply-patches.mjs --check",
     "patches:generate": "node scripts/generate-tier1-patches.mjs --upstream review/GDevelop"
