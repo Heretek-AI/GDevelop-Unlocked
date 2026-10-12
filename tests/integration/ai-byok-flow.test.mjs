@@ -343,3 +343,148 @@ describe('integration: BYOK tool schemas, zero-egress routing, patch-level leak 
     }
   });
 });
+
+describe('integration: T03 tool manifest pruning (no dead tool calls)', () => {
+  it('search_docs/read_full_docs carry the offline suffix and fail closed with no network', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const src = readFileSync(
+      resolve(root, 'packages/ai-studio/AI/CustomAIClient.js'),
+      'utf8'
+    );
+    const suffix =
+      '[Offline in local BYOK mode: rely on internal GDevelop knowledge and on-project verification]';
+    assert.ok(
+      src.includes(suffix),
+      'offline suffix missing from CustomAIClient tool descriptions'
+    );
+    // Both docs tools must carry it.
+    const searchAt = src.indexOf("name: 'search_docs'");
+    const readAt = src.indexOf("name: 'read_full_docs'");
+    assert.ok(searchAt !== -1 && readAt !== -1, 'docs tools missing from schema');
+    assert.ok(
+      src.slice(searchAt, searchAt + 800).includes(suffix),
+      'search_docs description lacks offline suffix'
+    );
+    assert.ok(
+      src.slice(readAt, readAt + 800).includes(suffix),
+      'read_full_docs description lacks offline suffix'
+    );
+    // Fail-closed helper: synchronous, offline:true, exact message, no fetch.
+    assert.ok(
+      src.includes('OFFLINE_DOCS_MESSAGE'),
+      'OFFLINE_DOCS_MESSAGE export missing'
+    );
+    assert.ok(
+      src.includes('Documentation backend is offline in local mode'),
+      'offline docs message text missing'
+    );
+    assert.ok(
+      src.includes('buildOfflineDocsResult'),
+      'buildOfflineDocsResult helper missing'
+    );
+    assert.ok(
+      src.includes('isOfflineDocsTool'),
+      'isOfflineDocsTool helper missing'
+    );
+    const helperAt = src.indexOf('export const buildOfflineDocsResult');
+    assert.ok(helperAt !== -1, 'buildOfflineDocsResult export missing');
+    const helperSlice = src.slice(helperAt, helperAt + 2000);
+    assert.ok(helperSlice.includes('offline: true'), 'docs result must set offline:true');
+    assert.ok(helperSlice.includes('success: false'), 'docs result must be success:false');
+    assert.ok(!helperSlice.includes('fetch('), 'offline docs result must not fetch (no network lag)');
+    assert.ok(!helperSlice.includes('axios'), 'offline docs result must not use axios');
+    // Zero egress: the offline message path never mentions the hosted API.
+    assert.ok(
+      !src.includes('api.gdevelop.io'),
+      'BYOK client must not hardcode the hosted API'
+    );
+  });
+
+  it('create_or_update_plan routes to PlanStore locally, never to upstream EditorFunctions', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const client = readFileSync(
+      resolve(root, 'packages/ai-studio/AI/CustomAIClient.js'),
+      'utf8'
+    );
+    const patch14 = readFileSync(resolve(root, 'patches/14-ai-utils.patch'), 'utf8');
+    // Schema keeps the tool so the manager keeps planning.
+    assert.ok(
+      client.includes("name: 'create_or_update_plan'"),
+      'plan tool missing from GDEVELOP_OPENAI_TOOLS'
+    );
+    assert.ok(
+      client.includes('isLocalPlanTool'),
+      'isLocalPlanTool marker missing (T03 plan routing)'
+    );
+    // Patch 14 pre-pass: local PlanStore routing before the editor dispatch.
+    for (const marker of [
+      'offlineDocsHandledCallIds',
+      'localPlanHandledCallIds',
+      'validatePlanTasks',
+      'buildPlanOutput',
+      'mergePlanTasks',
+      'OFFLINE_DOCS_MESSAGE',
+    ]) {
+      assert.ok(patch14.includes(marker), `patch 14 missing T03 marker: ${marker}`);
+    }
+    // Both pre-pass results are excluded from the editor and surfaced to the model.
+    assert.ok(
+      patch14.includes('!offlineDocsHandledCallIds.has(functionCall.call_id)'),
+      'docs calls must be excluded from editor dispatch'
+    );
+    assert.ok(
+      patch14.includes('!localPlanHandledCallIds.has(functionCall.call_id)'),
+      'plan calls must be excluded from editor dispatch'
+    );
+    assert.ok(
+      patch14.includes('...offlineDocsResults,'),
+      'docs results must be sent to the model'
+    );
+    assert.ok(
+      patch14.includes('...localPlanResults,'),
+      'plan results must be sent to the model'
+    );
+    // No network in the T03 pre-pass: docs fail closed synchronously.
+    const preAt = patch14.indexOf('T03 (#24)');
+    assert.ok(preAt !== -1, 'T03 pre-pass comment missing in patch 14');
+    const preSlice = patch14.slice(preAt, preAt + 6000);
+    assert.ok(!preSlice.includes('fetch('), 'T03 pre-pass must not fetch');
+  });
+
+  it('every GDEVELOP_OPENAI_TOOLS entry is dispatchable locally (no dead tools)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const src = readFileSync(
+      resolve(root, 'packages/ai-studio/AI/CustomAIClient.js'),
+      'utf8'
+    );
+    const patch14 = readFileSync(resolve(root, 'patches/14-ai-utils.patch'), 'utf8');
+    const toolRe =
+      /\{\s*type:\s*'function',\s*function:\s*\{\s*name:\s*'([^']+)',\s*description:\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/g;
+    const names = [];
+    let m;
+    while ((m = toolRe.exec(src)) !== null) names.push(m[1]);
+    assert.equal(names.length, 39, `expected 39 tools, found ${names.length}`);
+    // The three historically dead tools now have explicit local handling.
+    for (const dead of ['search_docs', 'read_full_docs', 'create_or_update_plan']) {
+      assert.ok(names.includes(dead), `tool missing from schema: ${dead}`);
+      assert.ok(
+        patch14.includes(dead),
+        `patch 14 has no local route for historically dead tool: ${dead}`
+      );
+    }
+    // Backend-only tools stay in schema for hosted turns but are withheld locally.
+    assert.ok(
+      src.includes('BACKEND_ONLY_TOOL_NAMES'),
+      'backend-only filter missing'
+    );
+  });
+});
