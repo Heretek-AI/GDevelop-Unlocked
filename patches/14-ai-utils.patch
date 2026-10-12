@@ -17,7 +17,7 @@
  } from './AiRequestUtils';
  import { useEnsureExtensionInstalled } from './UseEnsureExtensionInstalled';
  import { useGenerateEvents } from './UseGenerateEvents';
-@@ -62,6 +63,37 @@
+@@ -62,6 +63,39 @@
  import { makeSimplifiedProjectBuilder } from '../EditorFunctions/SimplifiedProject/SimplifiedProject';
  import { prepareAiUserContent } from './PrepareAiUserContent';
  import { extractGDevelopApiErrorStatusAndCode } from '../Utils/GDevelopServices/Errors';
@@ -27,6 +27,8 @@
 +  isOfflineDocsTool,
 +  OFFLINE_DOCS_MESSAGE,
 +  isLocalPlanTool,
++  isProjectDependentTool,
++  NO_PROJECT_MESSAGE,
 +} from '../AI/CustomAIClient';
 +import {
 +  isSpawnAgentCall,
@@ -55,7 +57,7 @@
  import UnsavedChangesContext from '../MainFrame/UnsavedChangesContext';
  import {
    type FileMetadata,
-@@ -213,12 +245,10 @@
+@@ -213,12 +247,10 @@
    editorCallbacks: EditorCallbacks,
  |}): React.Node => {
    if (aiRequest.parentAiRequestId) {
@@ -72,7 +74,7 @@
      if (launchingCall) {
        return renderFunctionCallLabel({
          functionCall: launchingCall,
-@@ -244,6 +274,7 @@
+@@ -244,6 +276,7 @@
    editorCallbacks,
    aiRequestsToProcess,
    onSendEditorFunctionCallResults,
@@ -80,7 +82,7 @@
    getEditorFunctionCallResults,
    addEditorFunctionCallResults,
    onSceneEventsModifiedOutsideEditor,
-@@ -265,6 +296,9 @@
+@@ -265,6 +298,9 @@
    suspendAiRequest,
    requestEditApproval,
    onSaveProjectAsWithStorageProvider,
@@ -90,7 +92,7 @@
  }: {|
    i18n: I18nType,
    project: ?gdProject,
-@@ -280,7 +314,7 @@
+@@ -280,7 +316,7 @@
        createdExternalLayoutNames?: Array<string>,
        createdProject?: ?gdProject,
      |}
@@ -99,7 +101,7 @@
    getEditorFunctionCallResults: string => Array<EditorFunctionCallResult> | null,
    addEditorFunctionCallResults: (
      string,
-@@ -319,6 +353,9 @@
+@@ -319,6 +355,9 @@
    onWillInstallExtension: (extensionNames: Array<string>) => void,
    onExtensionInstalled: (extensionNames: Array<string>) => void,
    isReadyToProcessFunctionCalls: boolean,
@@ -109,7 +111,7 @@
    getIsAutoEditEnabled: () => boolean,
    suspendAiRequest: (aiRequestId: string) => Promise<void>,
    requestEditApproval: (request: EditApprovalRequest) => Promise<boolean>,
-@@ -331,12 +368,30 @@
+@@ -331,12 +370,30 @@
        createdProject?: gdProject,
      |}
    ) => Promise<?FileMetadata>,
@@ -140,7 +142,7 @@
  } => {
    const { ensureExtensionInstalled } = useEnsureExtensionInstalled({
      project,
-@@ -424,6 +479,14 @@
+@@ -424,6 +481,14 @@
    // `call:<callId>` (for a single direct modifying call like generate_events).
    const approvedEditBatchKeysRef = React.useRef<Set<string>>(new Set());
  
@@ -155,7 +157,7 @@
    // Forget all previously-granted edit approvals so the next modifying call
    // asks again. Called when the user toggles auto-edit: turning it on then off
    // again means they want to review the upcoming edits, even within a sub-agent
-@@ -440,6 +503,16 @@
+@@ -440,6 +505,16 @@
        if (!isReadyToProcessFunctionCalls) return;
        if (aiRequest.status === 'suspended') return;
  
@@ -172,7 +174,7 @@
        const functionCallsToProcess = functionCalls.filter(
          functionCall =>
            !inFlightFunctionCallIdsRef.current.has(
-@@ -460,14 +533,60 @@
+@@ -460,14 +535,60 @@
          );
        });
  
@@ -235,7 +237,7 @@
  
        // Gate project-modifying calls behind a user confirmation when auto-edit
        // is off. Read-only calls (exploration, inspection) always run. The first
-@@ -493,10 +612,16 @@
+@@ -493,10 +614,16 @@
          const modifyingFunctionCalls = functionCallsToProcess.filter(
            functionCall =>
              doesFunctionCallModifyProject(functionCall) &&
@@ -252,7 +254,7 @@
              !isCallApproved(functionCall)
          );
  
-@@ -554,13 +679,365 @@
+@@ -554,13 +681,406 @@
          }
        }
  
@@ -363,6 +365,44 @@
 +        }
 +      }
 +
++      // T04 (#21): no-project self-remedy. With no project open every
++      // project-dependent tool fails deterministically with the
++      // initialize_project remedy instead of a null crash. Checked before
++      // the editor dispatch; initialize_project itself is never blocked.
++      const noProjectHandledCallIds = new Set<string>();
++      const noProjectResults: Array<EditorFunctionCallResult> = [];
++      if (isCustomEndpointEnabled() && !project) {
++        for (const functionCall of functionCallsToProcess) {
++          if (studioDeniedCallIds.has(functionCall.call_id)) continue;
++          if (loopGuardHandledCallIds.has(functionCall.call_id)) continue;
++          const needsProject =
++            typeof isProjectDependentTool === 'function'
++              ? isProjectDependentTool(functionCall.name)
++              : functionCall.name !== 'initialize_project' &&
++                functionCall.name !== 'get_game_starter_summary' &&
++                functionCall.name !== 'search_docs' &&
++                functionCall.name !== 'read_full_docs' &&
++                functionCall.name !== 'search_object_asset_store' &&
++                functionCall.name !== 'search_resource_store' &&
++                functionCall.name !== 'create_or_update_plan' &&
++                functionCall.name !== 'spawn_agent';
++          if (needsProject) {
++            noProjectHandledCallIds.add(functionCall.call_id);
++            const noProjectDenial = {
++              status: 'finished',
++              call_id: functionCall.call_id,
++              success: false,
++              output: {
++                message: `${NO_PROJECT_MESSAGE} (tool: ${functionCall.name})`,
++                noProject: true,
++              },
++            };
++            noProjectResults.push(noProjectDenial);
++            addEditorFunctionCallResults(aiRequest.id, [noProjectDenial]);
++          }
++        }
++      }
++
 +      // T03 (#24): offline docs + local plan pre-pass. Both are dead upstream
 +      // (EditorFunctions fails them as "handled server-side"), so they are
 +      // routed locally with zero network I/O before the editor dispatch. A
@@ -376,6 +416,7 @@
 +        for (const functionCall of functionCallsToProcess) {
 +          if (studioDeniedCallIds.has(functionCall.call_id)) continue;
 +          if (loopGuardHandledCallIds.has(functionCall.call_id)) continue;
++          if (noProjectHandledCallIds.has(functionCall.call_id)) continue;
 +          const isDocs =
 +            functionCall.name === 'search_docs' ||
 +            functionCall.name === 'read_full_docs' ||
@@ -578,7 +619,8 @@
 +          !loopGuardHandledCallIds.has(functionCall.call_id) &&
 +          !studioDeniedCallIds.has(functionCall.call_id) &&
 +          !offlineDocsHandledCallIds.has(functionCall.call_id) &&
-+          !localPlanHandledCallIds.has(functionCall.call_id)
++          !localPlanHandledCallIds.has(functionCall.call_id) &&
++          !noProjectHandledCallIds.has(functionCall.call_id)
 +      );
 +      // Mark only the editor calls as "working": a spawn (or a loop-guard hit)
 +      // already has a terminal result, and a permanent "working" entry would
@@ -601,6 +643,7 @@
 +          ...spawnFailureResults,
 +          ...offlineDocsResults,
 +          ...localPlanResults,
++          ...noProjectResults,
 +        ];
 +        if (outcomeResults.length > 0) {
 +          await onSendEditorFunctionCallResults(
@@ -619,7 +662,7 @@
  
        // The "modified outside editor" callbacks each refresh the editor and can
        // trigger an in-game editor hot reload. Firing them once per function
-@@ -669,7 +1146,7 @@
+@@ -669,7 +1189,7 @@
            // Explorer sub-agent scripts are read-only: restrict their
            // `run_script` to non-mutating functions (defense in depth).
            runScriptReadOnly: isReadOnlyScriptContext,
@@ -628,7 +671,7 @@
              name: functionCall.name,
              arguments: functionCall.arguments,
              call_id: functionCall.call_id,
-@@ -761,13 +1238,54 @@
+@@ -761,13 +1281,55 @@
            return;
          }
  
@@ -674,6 +717,7 @@
 +            ...spawnFailureResults,
 +            ...offlineDocsResults,
 +            ...localPlanResults,
++            ...noProjectResults,
 +            ...mergedResults,
 +          ],
 +          {
@@ -688,7 +732,7 @@
        } finally {
          // Flush the coalesced editor notifications for everything modified in
          // this batch (one hot reload instead of one per call). In `finally` so
-@@ -787,7 +1305,9 @@
+@@ -787,7 +1349,9 @@
          }
  
          // Release the lock so these calls can be retried if needed
@@ -699,7 +743,7 @@
          functionCallsToProcess.forEach(functionCall => {
            inFlightFunctionCallIdsRef.current.delete(
              `${aiRequest.id}:${functionCall.call_id}`
-@@ -824,9 +1344,12 @@
+@@ -824,9 +1388,12 @@
        getAssetStoreTagForNewObject,
        generateEvents,
        onSendEditorFunctionCallResults,
@@ -712,7 +756,7 @@
      ]
    );
  
-@@ -870,9 +1393,50 @@
+@@ -870,9 +1437,50 @@
      [onProcessFunctionCalls, allFunctionCallsToProcess]
    );
  
@@ -763,7 +807,7 @@
    };
  };
  
-@@ -977,7 +1541,6 @@
+@@ -977,7 +1585,6 @@
      editorFunctionCallResultsStorage,
      isFetchingSuggestions,
      setIsFetchingSuggestions,
@@ -771,7 +815,7 @@
      setSelectedAiRequestId,
      selectedAiRequest,
    } = React.useContext(AiRequestContext);
-@@ -1036,20 +1599,19 @@
+@@ -1036,20 +1643,19 @@
          // Then ask for some.
          if (
            !selectedAiRequest ||
@@ -803,7 +847,7 @@
  
          // Check if there are tools being run. If so, no suggestions at this time.
          const hasFunctionsCallsToProcess =
-@@ -1139,7 +1701,7 @@
+@@ -1139,7 +1745,7 @@
            : null;
          const preparedAiUserContent = await prepareAiUserContent({
            getAuthorizationHeader,
@@ -812,7 +856,7 @@
            simplifiedProjectJson,
            projectSpecificExtensionsSummaryJson,
            eventsJson: null,
-@@ -1153,7 +1715,7 @@
+@@ -1153,7 +1759,7 @@
            const aiRequestWorkingForSuggestions = await getAiRequestSuggestions(
              getAuthorizationHeader,
              {
@@ -821,7 +865,7 @@
                aiRequestId: selectedAiRequest.id,
                suggestionsType: isLastMessageFunctionCallOutputProjectInitialization
                  ? 'list-with-explanations'
-@@ -1525,39 +2087,12 @@
+@@ -1525,39 +2131,12 @@
      [profile, setSelectedAiRequestId]
    );
  
