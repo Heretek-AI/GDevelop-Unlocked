@@ -585,3 +585,108 @@ describe('integration: T04 no-project self-remedy (null project)', () => {
     assert.ok(!preSlice.includes('fetch('), 'no-project pre-pass must not fetch');
   });
 });
+
+describe('integration: T05 suspended UI and resume (terminal status card)', () => {
+  it('UseStudioRuntime exposes the terminal status, resume, and clear-stalled helpers', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const src = readFileSync(
+      resolve(root, 'packages/ai-studio/AiGeneration/Studio/UseStudioRuntime.js'),
+      'utf8'
+    );
+    for (const marker of [
+      'getTerminalStatusForRequest',
+      'isTerminalRequestStatus',
+      'buildResumeUpdate',
+      'buildResumeSteerMessage',
+      'clearStalledRequests',
+      'STALLED_REQUESTS_STORAGE_KEY',
+    ]) {
+      assert.ok(src.includes(marker), `UseStudioRuntime missing T05 helper: ${marker}`);
+    }
+    // Badge contract: Suspended vs Stopped by Loop Guard.
+    assert.ok(src.includes("'Suspended'"), 'Suspended badge missing');
+    assert.ok(src.includes("'Stopped by Loop Guard'"), 'Loop Guard badge missing');
+    // Exact reason + timestamp surface (returned as { badge, reason, timestamp }).
+    assert.ok(src.includes('reason'), 'terminal reason not surfaced');
+    assert.ok(src.includes('timestamp'), 'terminal timestamp not surfaced');
+    // Resume clears back to ready with a steer prompt (LoopGuard resets on next user message).
+    const resumeAt = src.indexOf('export const buildResumeUpdate');
+    assert.ok(resumeAt !== -1, 'buildResumeUpdate export missing');
+    const resumeSlice = src.slice(resumeAt, resumeAt + 2000);
+    assert.ok(resumeSlice.includes("status: 'ready'"), 'resume must reset status to ready');
+    assert.ok(resumeSlice.includes('error: null'), 'resume must clear the error');
+    assert.ok(resumeSlice.includes('buildResumeSteerMessage'), 'resume must attach the steer prompt');
+    // Clear Stalled purges exactly gd-custom-ai-requests.
+    assert.ok(
+      src.includes("gd-custom-ai-requests"),
+      'Clear Stalled must purge gd-custom-ai-requests'
+    );
+    const clearAt = src.indexOf('export const clearStalledRequests');
+    const clearSlice = src.slice(clearAt, clearAt + 1200);
+    assert.ok(clearSlice.includes('localStorage.removeItem'), 'clear must remove the storage key');
+    assert.ok(!clearSlice.includes('fetch('), 'clear must not fetch');
+  });
+
+  it('patch 11 mounts the terminal card with Resume/Retry and Clear Stalled', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const patch11 = readFileSync(resolve(root, 'patches/11-studio-runtime-mount.patch'), 'utf8');
+    for (const marker of [
+      'getTerminalStatusForRequest',
+      'buildResumeUpdate',
+      'clearStalledRequests',
+      'Resume/Retry',
+      'Clear Stalled',
+      'T05 (#22)',
+    ]) {
+      assert.ok(patch11.includes(marker), `patch 11 missing T05 marker: ${marker}`);
+    }
+    // Terminal gating on suspended/error, replacing the spinner path.
+    assert.ok(
+      patch11.includes('getTerminalStatusForRequest(selectedAiRequest)'),
+      'card must gate on the selected request status'
+    );
+    // Anti-revert: patch 11 must not delete upstream-new symbols.
+    assert.ok(
+      !/^-[^-].*attachmentIds/m.test(patch11),
+      'patch 11 deletes upstream-new symbol attachmentIds'
+    );
+  });
+
+  it('patch 11 dry-runs clean on a pristine upstream copy (real I/O)', async () => {
+    const { spawnSync } = await import('node:child_process');
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const root = path.dirname(
+      path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+    );
+    const upstream =
+      process.env.UPSTREAM_DIR || path.join(root, 'review', 'GDevelop');
+    const rel = 'newIDE/app/src/AiGeneration/AskAiEditorContainer.js';
+    assert.ok(
+      fs.existsSync(path.join(upstream, rel)),
+      `missing fixture ${rel} (set UPSTREAM_DIR)`
+    );
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 't05-p11-'));
+    try {
+      const dest = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(path.join(upstream, rel), dest);
+      const r = spawnSync(
+        'patch',
+        ['-p1', '-s', '--dry-run', '-i', path.join(root, 'patches/11-studio-runtime-mount.patch')],
+        { cwd: dir, encoding: 'utf8' }
+      );
+      assert.equal(r.status, 0, `patch 11 dry-run failed:\n${r.stdout}\n${r.stderr}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
