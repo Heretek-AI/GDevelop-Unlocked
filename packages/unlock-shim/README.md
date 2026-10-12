@@ -7,6 +7,7 @@ no React, no Electron, no GDevelop core imports.
 | Module | Role | Tests |
 |---|---|---|
 | `generation-shim.mjs` | Tier-2 routing: `local-ai-*` → custom client, hosted → hosted API, fail-closed leak guard (`assertNoLocalIdsLeak`, `guardHostedCall`) | `tests/tier2/shim.test.mjs`, `tests/integration/ai-byok-flow.test.mjs` |
+| `control-shim.mjs` | Programmatic project control (T07 #16): `read`/`writeGDevelopProject` (single-file + split-folder `__REFERENCE_TO_SPLIT_OBJECT`), `createScene`, `createOrReplaceObject`, `addBehavior` (Platformer/Physics2/TopDown defaults), `addStandardEvent`, `buildGDevelopCliCommand` (`--run-command`/`--cmd-args` for `electron-app/app/main.js` + `LocalCliCommandRunner`), `connectDebuggerBridge` (minimal RFC6455 client over `node:net` for the preview `DebuggerServer`) | `tests/unit/opencode-control-shim.test.mjs` |
 
 ## Duplication contract (what actually ships)
 
