@@ -1,13 +1,13 @@
 class GdevelopUnlocked < Formula
   desc "Unlocked desktop IDE for GDevelop 5 with BYOK local AI studio"
   homepage "https://github.com/Heretek-AI/GDevelop-Unlocked"
-  version "0.1.0"
+  version "5.6.283"
   license "MIT"
 
   on_linux do
     on_intel do
-      url "https://github.com/Heretek-AI/GDevelop-Unlocked/releases/download/unlocked-8301cdcaa48b496f48a28a6e3a56fa833eaeddff/gdevelop-unlocked-linux-x64-8301cdcaa48b496f48a28a6e3a56fa833eaeddff.zip"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      url "https://github.com/Heretek-AI/GDevelop-Unlocked/releases/download/unlocked-8301cdcaa48b496f48a28a6e3a56fa833eaeddff/gdevelop-5.6.283.zip"
+      sha256 "7a961d66b5256d00b41a7aad61165d7433003de27b39f10593a76fbe6927991e"
     end
 
     on_arm do
