@@ -1,9 +1,9 @@
 {
   "files": {
     "AI/CustomAIClient.js": {
-      "bytes": 219321,
+      "bytes": 219717,
       "origin": "newIDE/app/src/AI/CustomAIClient.js",
-      "sha256": "8b0f606f756c29f82cfd5f15c0646c929abd072a80d4e77d18d4663f541b5bde"
+      "sha256": "63dd86870cef349cdbaa0f6062ce4059fedeed6233e8ba4a65501f4078100188"
     },
     "AI/CustomAIClient.spec.js": {
       "bytes": 257794,

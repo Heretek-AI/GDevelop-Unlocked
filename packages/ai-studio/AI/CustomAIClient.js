@@ -5178,8 +5178,13 @@ export const customCreateSubAgentAiRequest = async ({
     // read-only subset instead of failing open, which is why this differs from
     // the continue-turn fallback above (there the role only re-derives tools
     // for an already-created agent).
+    // The caller normally passes the project structure, but a sub-agent can be
+    // spawned without it (e.g. a re-derived turn). Fall back to the parent
+    // request's stored project so `initialize_project` stays withheld while a
+    // project is open — the same fallback the continue-turn path uses above.
+    const parentRequest = localAiRequestsCache[parentAiRequestId];
     const hasOpenProject = Boolean(
-      gameProjectJson || (parent && parent.gameProjectJson)
+      gameProjectJson || (parentRequest && parentRequest.gameProjectJson)
     );
     const subAgentTools = withoutBackendOnlyTools(
       isStudioRoleId(roleId)
