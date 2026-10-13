@@ -16,10 +16,18 @@
 
 export type StudioDebugEvent =
   | '[AI_REQUEST_START]'
+  | '[AI_REQUEST_SENT]'
+  | '[AI_RESPONSE_RECEIVED]'
+  | '[AI_REQUEST_ERROR]'
   | '[TOOL_CALL]'
   | '[TOOL_RESULT]'
   | '[GUARD_EVALUATE]'
-  | '[REQUEST_STATE_CHANGE]';
+  | '[REQUEST_STATE_CHANGE]'
+  | 'ai-request-sent'
+  | 'ai-response-received'
+  | 'ai-request-error'
+  | 'ai-tool-call-executed'
+  | string;
 
 /**
  * Push one debug record to the renderer logger when it exists.
@@ -27,13 +35,17 @@ export type StudioDebugEvent =
  */
 export const emitStudioDebugEvent = (
   event: StudioDebugEvent,
-  data?: { [string]: mixed }
+  data?: { [string]: mixed },
+  level?: 'debug' | 'info' | 'warn' | 'error'
 ): void => {
   try {
     if (typeof window === 'undefined') return;
     const target = (window: any).__HERETEK_LOGGER__;
     if (!target || typeof target.push !== 'function') return;
-    target.push('debug', event, data || {});
+    const resolvedLevel =
+      level ||
+      (typeof event === 'string' && event.startsWith('[') ? 'debug' : 'info');
+    target.push(resolvedLevel, event, data || {});
   } catch (error) {
     // Observability only — never break the agent loop.
   }

@@ -217,16 +217,22 @@ export const createLoopGuard = (
         repeatCount = 1;
       }
       // T02 debug event: the guard observes every tool call.
-      emitStudioDebugEvent('[TOOL_CALL]', { name: call.name, key });
+      emitStudioDebugEvent('[TOOL_CALL]', {
+        name: call.name,
+        key,
+        callId: call.call_id || call.callId,
+        arguments: call.arguments,
+        repeatCount,
+      });
     },
     recordSuccess: () => {
       // Only a real success clears the error storm: an attempt is not progress.
       errorCount = 0;
-      emitStudioDebugEvent('[TOOL_RESULT]', { ok: true });
+      emitStudioDebugEvent('[TOOL_RESULT]', { ok: true, errorCount });
     },
     recordError: () => {
       errorCount++;
-      emitStudioDebugEvent('[TOOL_RESULT]', { ok: false });
+      emitStudioDebugEvent('[TOOL_RESULT]', { ok: false, errorCount }, 'warn');
     },
     recordTurn: () => {
       turnCount++;

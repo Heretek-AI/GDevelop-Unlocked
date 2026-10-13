@@ -1,9 +1,9 @@
 {
   "files": {
     "AI/CustomAIClient.js": {
-      "bytes": 212395,
+      "bytes": 217470,
       "origin": "newIDE/app/src/AI/CustomAIClient.js",
-      "sha256": "28e24dde3cde3941f6ae514d415fcc5069ce2229f3d888e95aa767ebef7e22f1"
+      "sha256": "f26add5421aa2b2aee5a54bfceac8391992b2b115663c1afbe3588ac0914c159"
     },
     "AI/CustomAIClient.spec.js": {
       "bytes": 257794,
@@ -11,9 +11,9 @@
       "sha256": "0152072739b6590f004e886b8a5787cd769a529f044f14e48ca7e78ecc2a560a"
     },
     "AiGeneration/Studio/DebugEvents.js": {
-      "bytes": 1426,
+      "bytes": 1788,
       "origin": "repo-original (T02 debug emitter, not a donor extraction)",
-      "sha256": "9e5e5a551f6655d5aeecc04cb1d0e6c04f13e820607fabfb5816b14b7219f76d"
+      "sha256": "7c069367b3e7962fad5f6812c7ad58b52056e69c9d532919ed33c2eb73766c32"
     },
     "AiGeneration/Studio/EditApprovalLabel.js": {
       "bytes": 1308,
@@ -26,9 +26,9 @@
       "sha256": "708de36210d000af56e795280eaa5dd450e32cedb4a54b7b031353a6cc4a679f"
     },
     "AiGeneration/Studio/LoopGuard.js": {
-      "bytes": 11296,
+      "bytes": 11452,
       "origin": "newIDE/app/src/AiGeneration/Studio/LoopGuard.js",
-      "sha256": "8fd346b75556051e7f03a15066ab562168f2028d5fca028583d9e7449be9b1ee"
+      "sha256": "e0e4615a3e040877bae01e75f11f183c0192387c6ce2c360323381c88575ca3b"
     },
     "AiGeneration/Studio/NudgePolicy.js": {
       "bytes": 3821,

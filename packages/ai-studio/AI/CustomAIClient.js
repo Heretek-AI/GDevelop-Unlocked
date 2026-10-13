@@ -14,6 +14,7 @@ import {
   resolveStudioRoleId,
   READ_ONLY_TOOL_NAMES,
 } from '../AiGeneration/Studio/Roles';
+import { emitStudioDebugEvent } from '../AiGeneration/Studio/DebugEvents';
 import {
   type AiRequest,
   type AiRequestMessage,
@@ -3714,6 +3715,47 @@ const streamChatCompletion = async ({
   }
 };
 
+export const safeFormatMessagesForDebug = (
+  messages: ?Array<any>
+): Array<Object> => {
+  if (!Array.isArray(messages)) return [];
+  return messages.map(msg => {
+    if (!msg || typeof msg !== 'object') return {};
+    const item: Object = {
+      role: typeof msg.role === 'string' ? msg.role : 'unknown',
+    };
+    if (typeof msg.content === 'string') {
+      item.content =
+        msg.content.length > 5000
+          ? msg.content.slice(0, 5000) + '... [truncated for debug log]'
+          : msg.content;
+    } else if (msg.content) {
+      try {
+        item.content = JSON.stringify(msg.content);
+      } catch (_) {}
+    }
+    if (Array.isArray(msg.tool_calls)) {
+      item.tool_calls = msg.tool_calls.map(tc => ({
+        id: tc && tc.id,
+        type: tc && tc.type,
+        name: tc && tc.function && tc.function.name,
+        arguments:
+          tc && tc.function && typeof tc.function.arguments === 'string'
+            ? (tc.function.arguments.length > 2000
+                ? tc.function.arguments.slice(0, 2000) + '... [truncated]'
+                : tc.function.arguments)
+            : tc && tc.function
+            ? tc.function.arguments
+            : undefined,
+      }));
+    }
+    if (typeof msg.tool_call_id === 'string') {
+      item.tool_call_id = msg.tool_call_id;
+    }
+    return item;
+  });
+};
+
 /**
  * Send a chat completion request to the OpenAI-compatible endpoint.
  */
@@ -3724,6 +3766,7 @@ export const sendChatCompletion = async ({
   signal,
   onStreamDelta,
   onProviderTelemetry,
+  reqId,
 }: {|
   messages: Array<Object>,
   tools?: ?Array<Object>,
@@ -3731,6 +3774,7 @@ export const sendChatCompletion = async ({
   signal?: ?AbortSignal,
   onStreamDelta?: (partialContent: string) => void,
   onProviderTelemetry?: (telemetry: Object) => void,
+  reqId?: ?string,
 |}): Promise<Object> => {
   const currentConfig = config || getCustomEndpointConfig();
   const baseUrl = normalizeBaseUrl(currentConfig.baseUrl);
@@ -3786,9 +3830,28 @@ export const sendChatCompletion = async ({
     payload.max_tokens = currentConfig.maxTokens;
   }
 
+  const turnStartTime = Date.now();
+  emitStudioDebugEvent(
+    'ai-request-sent',
+    {
+      requestId: reqId || undefined,
+      endpointUrl,
+      model: payload.model,
+      temperature: payload.temperature,
+      maxTokens: payload.max_tokens,
+      messagesCount: Array.isArray(messages) ? messages.length : 0,
+      toolsCount: Array.isArray(tools) ? tools.length : 0,
+      toolNames: Array.isArray(tools)
+        ? tools.map(t => t && t.function && t.function.name).filter(Boolean)
+        : [],
+      messages: safeFormatMessagesForDebug(messages),
+    },
+    'info'
+  );
+
   if (currentConfig.streaming && typeof fetch !== 'undefined') {
     try {
-      return await streamChatCompletion({
+      const streamedResponse = await streamChatCompletion({
         endpointUrl,
         headers,
         payload,
@@ -3797,6 +3860,40 @@ export const sendChatCompletion = async ({
         onStreamDelta,
         onProviderTelemetry,
       });
+      const durationMs = Date.now() - turnStartTime;
+      emitStudioDebugEvent(
+        'ai-response-received',
+        {
+          requestId: reqId || undefined,
+          endpointUrl,
+          model: payload.model,
+          durationMs,
+          streaming: true,
+          content:
+            typeof streamedResponse.content === 'string'
+              ? (streamedResponse.content.length > 5000
+                  ? streamedResponse.content.slice(0, 5000) +
+                    '... [truncated for debug log]'
+                  : streamedResponse.content)
+              : '',
+          toolCalls: Array.isArray(streamedResponse.tool_calls)
+            ? streamedResponse.tool_calls.map(tc => ({
+                id: tc && tc.id,
+                name: tc && tc.function && tc.function.name,
+                arguments:
+                  tc && tc.function && typeof tc.function.arguments === 'string'
+                    ? (tc.function.arguments.length > 2000
+                        ? tc.function.arguments.slice(0, 2000) + '... [truncated]'
+                        : tc.function.arguments)
+                    : tc && tc.function
+                    ? tc.function.arguments
+                    : undefined,
+              }))
+            : [],
+        },
+        'info'
+      );
+      return streamedResponse;
     } catch (streamError) {
       // A user abort must not trigger a retry: the caller signal is already
       // aborted and the non-streaming request would immediately fail too.
@@ -3847,7 +3944,42 @@ export const sendChatCompletion = async ({
       response.data.choices[0] &&
       response.data.choices[0].message
     ) {
-      return response.data.choices[0].message;
+      const durationMs = Date.now() - turnStartTime;
+      const respMsg = response.data.choices[0].message;
+      emitStudioDebugEvent(
+        'ai-response-received',
+        {
+          requestId: reqId || undefined,
+          endpointUrl,
+          model: payload.model,
+          durationMs,
+          streaming: false,
+          usage: response.data.usage,
+          content:
+            typeof respMsg.content === 'string'
+              ? (respMsg.content.length > 5000
+                  ? respMsg.content.slice(0, 5000) +
+                    '... [truncated for debug log]'
+                  : respMsg.content)
+              : '',
+          toolCalls: Array.isArray(respMsg.tool_calls)
+            ? respMsg.tool_calls.map(tc => ({
+                id: tc && tc.id,
+                name: tc && tc.function && tc.function.name,
+                arguments:
+                  tc && tc.function && typeof tc.function.arguments === 'string'
+                    ? (tc.function.arguments.length > 2000
+                        ? tc.function.arguments.slice(0, 2000) + '... [truncated]'
+                        : tc.function.arguments)
+                    : tc && tc.function
+                    ? tc.function.arguments
+                    : undefined,
+              }))
+            : [],
+        },
+        'info'
+      );
+      return respMsg;
     }
 
     // Some servers report a model failure with HTTP 200 and an error body
@@ -3870,6 +4002,19 @@ export const sendChatCompletion = async ({
 
     return response.data;
   } catch (error) {
+    const durationMs = Date.now() - turnStartTime;
+    emitStudioDebugEvent(
+      'ai-request-error',
+      {
+        requestId: reqId || undefined,
+        endpointUrl,
+        model: payload.model,
+        durationMs,
+        error: error && error.message ? String(error.message) : String(error),
+        status: error && error.response && error.response.status,
+      },
+      'error'
+    );
     if (axios.isCancel(error) || (signal && signal.aborted)) {
       throw new Error('AI request was aborted.');
     }
@@ -4485,6 +4630,7 @@ export const customCreateAiRequest = async ({
         ? { ...createConfig, model: modelOverride }
         : createConfig,
       signal: abortController.signal,
+      reqId,
       // The first turn is the one most likely to hit a model still loading, so
       // it must publish partial content like addMessage does: the chat's
       // cold-start hint reads this registry to tell "waiting for the first
@@ -4758,6 +4904,7 @@ export const customAddMessageToAiRequest = async ({
           ? { ...continueConfig, model: modelOverride }
           : continueConfig,
         signal: abortController.signal,
+        reqId: aiRequestId,
         onStreamDelta: partialContent => {
           localAiRequestPartialContent[aiRequestId] = partialContent;
         },

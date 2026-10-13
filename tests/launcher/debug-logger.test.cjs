@@ -159,9 +159,11 @@ describe('debug-logger: hook integration', () => {
         this.options = options;
       }
     }
+    const ipcListeners = {};
     return {
       electron: {
         app: { on: (event, cb) => (listeners[event] = cb) },
+        ipcMain: { on: (event, cb) => (ipcListeners[event] = cb) },
         session: {
           defaultSession: {
             webRequest: {
@@ -173,9 +175,40 @@ describe('debug-logger: hook integration', () => {
         BrowserWindow: FakeWindow,
       },
       listeners,
+      ipcListeners,
       webRequests,
     };
   }
+
+  it('bridges renderer events from ipcMain to the debug log file', () => {
+    const hook = require('../../launcher/heretek-hook.cjs');
+    const file = path.join(mkScratch(), 'ipc-hook.jsonl');
+    const debug = debugLogger.createDebugLogger({
+      logPath: file,
+      source: 'main',
+    });
+    const quiet = { info: () => {}, warn: () => {}, error: () => {} };
+    const { electron, ipcListeners } = makeFakeElectron();
+    hook.installPreloadHook(electron, {
+      logger: quiet,
+      skipUpdaterWatch: true,
+      debugLogger: debug,
+    });
+    assert.ok(ipcListeners['heretek:debug-log'], 'ipc listener registered');
+    ipcListeners['heretek:debug-log']({}, {
+      level: 'info',
+      event: 'ai-request-sent',
+      data: { requestId: 'req-test-1', model: 'qwen2.5-coder' },
+      source: 'renderer',
+    });
+    const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
+    const records = lines.map(l => JSON.parse(l));
+    const aiReq = records.find(r => r.event === 'ai-request-sent');
+    assert.ok(aiReq, 'ai-request-sent written');
+    assert.equal(aiReq.source, 'renderer');
+    assert.equal(aiReq.level, 'info');
+    assert.equal(aiReq.data.requestId, 'req-test-1');
+  });
 
   it('logs install + window creation, and flags hosted api attempts', () => {
     const hook = require('../../launcher/heretek-hook.cjs');
@@ -279,6 +312,26 @@ describe('debug-logger: renderer logger (preload)', () => {
     preload.installRendererHook(scope);
     for (let i = 0; i < 600; i++) scope.__HERETEK_LOGGER__.push('debug', 'x', {});
     assert.ok(scope.__HERETEK_LOGGER__.events.length <= 500);
+  });
+
+  it('forwards pushRecord to ipcRenderer when available', () => {
+    const preload = require('../../launcher/preload-unlock.cjs');
+    const ipcSent = [];
+    const fakeIpc = {
+      send: (channel, data) => ipcSent.push({ channel, data }),
+    };
+    const { scope } = makeRendererScope();
+    scope.require = name =>
+      name === 'electron' ? { ipcRenderer: fakeIpc } : null;
+    preload.installRendererHook(scope);
+    scope.__HERETEK_LOGGER__.push('info', 'ai-request-sent', {
+      model: 'test-model',
+    });
+    assert.equal(ipcSent.length, 1);
+    assert.equal(ipcSent[0].channel, 'heretek:debug-log');
+    assert.equal(ipcSent[0].data.event, 'ai-request-sent');
+    assert.equal(ipcSent[0].data.source, 'renderer');
+    assert.equal(ipcSent[0].data.data.model, 'test-model');
   });
 
   it('renderer logger survives the vm-sandbox fallback path', () => {

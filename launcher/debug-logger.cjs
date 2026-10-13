@@ -95,10 +95,10 @@ function createDebugLogger(opts) {
   } catch (error) {
     return makeDisabledLogger(logPath, error);
   }
-  function log(level, event, data) {
+  function log(level, event, data, customSource) {
     let record;
     try {
-      record = toRecord(source, level, event, data);
+      record = toRecord(customSource || source, level, event, data);
       fs.appendFileSync(logPath, JSON.stringify(record) + '\n');
     } catch (error) {
       return null;
@@ -110,10 +110,10 @@ function createDebugLogger(opts) {
     logPath,
     openError: null,
     log,
-    debug: (event, data) => log('debug', event, data),
-    info: (event, data) => log('info', event, data),
-    warn: (event, data) => log('warn', event, data),
-    error: (event, data) => log('error', event, data),
+    debug: (event, data, customSource) => log('debug', event, data, customSource),
+    info: (event, data, customSource) => log('info', event, data, customSource),
+    warn: (event, data, customSource) => log('warn', event, data, customSource),
+    error: (event, data, customSource) => log('error', event, data, customSource),
     close: () => {},
   };
 }

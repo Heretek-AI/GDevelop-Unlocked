@@ -100,6 +100,22 @@ function createRendererLogger(scope) {
     }
     return '';
   }
+  function resolveIpc() {
+    try {
+      if (typeof require === 'function') {
+        var el = require('electron');
+        if (el && el.ipcRenderer) return el.ipcRenderer;
+      }
+    } catch (_) {}
+    try {
+      if (scope && typeof scope.require === 'function') {
+        var elScope = scope.require('electron');
+        if (elScope && elScope.ipcRenderer) return elScope.ipcRenderer;
+      }
+    } catch (_) {}
+    return null;
+  }
+  var cachedIpc = null;
   function pushRecord(level, event, data) {
     var ts = now();
     var record = {
@@ -115,6 +131,14 @@ function createRendererLogger(scope) {
       while (events.length > MAX_RENDERER_LOG_EVENTS) events.shift();
     } catch (error) {
       // Observability only.
+    }
+    try {
+      if (!cachedIpc) cachedIpc = resolveIpc();
+      if (cachedIpc && typeof cachedIpc.send === 'function') {
+        cachedIpc.send('heretek:debug-log', record);
+      }
+    } catch (ipcError) {
+      // Best-effort IPC dispatch.
     }
     return record;
   }

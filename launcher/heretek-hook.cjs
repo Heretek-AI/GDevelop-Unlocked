@@ -44,10 +44,10 @@ try {
 }
 
 /** Structured file event; no-op unless an enabled debug logger is passed. */
-function debugLog(debug, level, event, data) {
+function debugLog(debug, level, event, data, customSource) {
   try {
     if (debug && debug.enabled && typeof debug.log === 'function')
-      return debug.log(level, event, data);
+      return debug.log(level, event, data, customSource);
   } catch (error) {
     // Observability only — never break the hook.
   }
@@ -401,6 +401,21 @@ function installPreloadHook(electronModule, opts) {
       `${webRequestDeferred ? ' (deferred to app-ready)' : ''}, ` +
       `updater pin: ${!!updaterWatched}).`
   );
+  const ipcMain = electron && electron.ipcMain;
+  if (ipcMain && !ipcMain.__heretekDebugBound && typeof ipcMain.on === 'function') {
+    ipcMain.__heretekDebugBound = true;
+    ipcMain.on('heretek:debug-log', (event, rec) => {
+      if (debug && debug.enabled && rec && typeof rec === 'object') {
+        debugLog(
+          debug,
+          rec.level || 'info',
+          rec.event || 'renderer-event',
+          rec.data || {},
+          rec.source || 'renderer'
+        );
+      }
+    });
+  }
   const uncaughtWatched = watchUncaught(debug);
   const result = {
     wrapped,
