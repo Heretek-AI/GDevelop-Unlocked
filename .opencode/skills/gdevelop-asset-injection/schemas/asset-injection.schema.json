@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GDevelopAssetInjectionSchema",
+  "description": "Schema for GDevelop 5 Project Resources, Sprite Animations, and Assets.",
+  "type": "object",
+  "required": ["resources"],
+  "properties": {
+    "resources": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ResourceDescriptor" },
+      "default": []
+    }
+  },
+  "definitions": {
+    "ResourceKind": {
+      "type": "string",
+      "enum": [
+        "image",
+        "audio",
+        "font",
+        "video",
+        "json",
+        "tilemap",
+        "tileset",
+        "bitmapFont",
+        "model3D",
+        "atlas",
+        "spine",
+        "javascript"
+      ]
+    },
+    "ResourceDescriptor": {
+      "type": "object",
+      "required": ["name", "kind", "file"],
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "$ref": "#/definitions/ResourceKind" },
+        "file": { "type": "string" },
+        "userAdded": { "type": "boolean", "default": true },
+        "metadata": { "type": "string" },
+        "origin": {
+          "type": "object",
+          "properties": {
+            "originName": { "type": "string" },
+            "originIdentifier": { "type": "string" }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "SpritePoint": {
+      "type": "object",
+      "required": ["name", "x", "y"],
+      "properties": {
+        "name": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "SpriteFrame": {
+      "type": "object",
+      "required": ["image"],
+      "properties": {
+        "image": { "type": "string" },
+        "hasCustomCollisionMask": { "type": "boolean", "default": false },
+        "customCollisionMask": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "x": { "type": "number" },
+                "y": { "type": "number" }
+              },
+              "required": ["x", "y"]
+            }
+          }
+        },
+        "points": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/SpritePoint" },
+          "default": []
+        }
+      }
+    },
+    "SpriteDirection": {
+      "type": "object",
+      "required": ["sprites"],
+      "properties": {
+        "timeBetweenFrames": { "type": "number", "default": 0.08 },
+        "looping": { "type": "boolean", "default": true },
+        "sprites": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/SpriteFrame" }
+        }
+      }
+    },
+    "SpriteAnimation": {
+      "type": "object",
+      "required": ["name", "directions"],
+      "properties": {
+        "name": { "type": "string" },
+        "useMultipleDirections": { "type": "boolean", "default": false },
+        "directions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/SpriteDirection" }
+        }
+      }
+    },
+    "SpriteObjectConfiguration": {
+      "type": "object",
+      "required": ["animations"],
+      "properties": {
+        "animations": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/SpriteAnimation" }
+        }
+      }
+    }
+  }
+}

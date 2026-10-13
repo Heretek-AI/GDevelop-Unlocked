@@ -1,0 +1,276 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GDevelopEventSheet",
+  "description": "JSON schema for GDevelop 5 Event Sheet, Instructions, and Event Trees.",
+  "type": "object",
+  "definitions": {
+    "Instruction": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "required": ["value"],
+              "properties": {
+                "value": { "type": "string" },
+                "inverted": { "type": "boolean" },
+                "await": { "type": "boolean" }
+              }
+            }
+          ]
+        },
+        "inverted": { "type": "boolean", "default": false },
+        "await": { "type": "boolean", "default": false },
+        "parameters": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "subInstructions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Instruction" },
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "Variable": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["number", "string", "boolean", "structure", "array"]
+        },
+        "value": { "type": ["string", "number", "boolean"] },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Variable" }
+        }
+      }
+    },
+    "StandardEvent": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "BuiltinCommonInstructions::Standard"
+        },
+        "disabled": { "type": "boolean", "default": false },
+        "folded": { "type": "boolean", "default": false },
+        "conditions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Instruction" },
+          "default": []
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Instruction" },
+          "default": []
+        },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/GDevelopEvent" },
+          "default": []
+        },
+        "variables": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Variable" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "WhileEvent": {
+      "type": "object",
+      "required": ["type", "whileConditions"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "BuiltinCommonInstructions::While"
+        },
+        "disabled": { "type": "boolean", "default": false },
+        "folded": { "type": "boolean", "default": false },
+        "whileConditions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Instruction" }
+        },
+        "conditions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Instruction" },
+          "default": []
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Instruction" },
+          "default": []
+        },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/GDevelopEvent" },
+          "default": []
+        },
+        "loopIndexVariableName": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "RepeatEvent": {
+      "type": "object",
+      "required": ["type", "repeatExpression"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "BuiltinCommonInstructions::Repeat"
+        },
+        "disabled": { "type": "boolean", "default": false },
+        "folded": { "type": "boolean", "default": false },
+        "repeatExpression": { "type": "string" },
+        "conditions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Instruction" },
+          "default": []
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Instruction" },
+          "default": []
+        },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/GDevelopEvent" },
+          "default": []
+        },
+        "loopIndexVariableName": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "ForEachEvent": {
+      "type": "object",
+      "required": ["type", "object"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "BuiltinCommonInstructions::ForEach"
+        },
+        "disabled": { "type": "boolean", "default": false },
+        "folded": { "type": "boolean", "default": false },
+        "object": { "type": "string" },
+        "conditions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Instruction" },
+          "default": []
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Instruction" },
+          "default": []
+        },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/GDevelopEvent" },
+          "default": []
+        },
+        "orderBy": { "type": "string" },
+        "order": { "type": "string", "enum": ["asc", "desc"] },
+        "limit": { "type": "string" },
+        "loopIndexVariableName": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "JsCodeEvent": {
+      "type": "object",
+      "required": ["type", "inlineCode"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "BuiltinCommonInstructions::JsCode"
+        },
+        "disabled": { "type": "boolean", "default": false },
+        "folded": { "type": "boolean", "default": false },
+        "inlineCode": { "type": "string" },
+        "parameterObjects": { "type": "string", "default": "" },
+        "useStrict": { "type": "boolean", "default": true },
+        "eventsSheetExpanded": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": true
+    },
+    "CommentEvent": {
+      "type": "object",
+      "required": ["type", "comment"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "BuiltinCommonInstructions::Comment"
+        },
+        "disabled": { "type": "boolean", "default": false },
+        "folded": { "type": "boolean", "default": false },
+        "comment": { "type": "string" },
+        "color": {
+          "type": "object",
+          "properties": {
+            "r": { "type": "integer" },
+            "g": { "type": "integer" },
+            "b": { "type": "integer" }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "GroupEvent": {
+      "type": "object",
+      "required": ["type", "name"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "BuiltinCommonInstructions::Group"
+        },
+        "disabled": { "type": "boolean", "default": false },
+        "folded": { "type": "boolean", "default": false },
+        "name": { "type": "string" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/GDevelopEvent" },
+          "default": []
+        }
+      },
+      "additionalProperties": true
+    },
+    "LinkEvent": {
+      "type": "object",
+      "required": ["type", "target"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "BuiltinCommonInstructions::Link"
+        },
+        "disabled": { "type": "boolean", "default": false },
+        "folded": { "type": "boolean", "default": false },
+        "target": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "GDevelopEvent": {
+      "oneOf": [
+        { "$ref": "#/definitions/StandardEvent" },
+        { "$ref": "#/definitions/WhileEvent" },
+        { "$ref": "#/definitions/RepeatEvent" },
+        { "$ref": "#/definitions/ForEachEvent" },
+        { "$ref": "#/definitions/JsCodeEvent" },
+        { "$ref": "#/definitions/CommentEvent" },
+        { "$ref": "#/definitions/GroupEvent" },
+        { "$ref": "#/definitions/LinkEvent" }
+      ]
+    }
+  },
+  "properties": {
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/GDevelopEvent" }
+    }
+  },
+  "required": ["events"]
+}

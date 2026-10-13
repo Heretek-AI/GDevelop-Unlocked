@@ -1,0 +1,197 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GDevelopExtensionSchema",
+  "description": "Schema for GDevelop 5 EventsFunctionsExtension, CustomBehaviors, CustomObjects, and Functions.",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": { "type": "string" },
+    "fullName": { "type": "string" },
+    "shortDescription": { "type": "string" },
+    "description": { "type": "string" },
+    "author": { "type": "string" },
+    "version": { "type": "string" },
+    "category": { "type": "string" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "helpPath": { "type": "string" },
+    "previewIconUrl": { "type": "string" },
+    "iconUrl": { "type": "string" },
+    "eventsFunctions": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/EventsFunction" },
+      "default": []
+    },
+    "eventsBasedBehaviors": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/EventsBasedBehavior" },
+      "default": []
+    },
+    "eventsBasedObjects": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/EventsBasedObject" },
+      "default": []
+    },
+    "dependencies": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Dependency" },
+      "default": []
+    },
+    "globalVariables": { "type": "array", "items": { "type": "object" } },
+    "sceneVariables": { "type": "array", "items": { "type": "object" } }
+  },
+  "definitions": {
+    "PropertyDescriptor": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["String", "Number", "Boolean", "Choice", "Color", "Behavior"]
+        },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "value": { "type": ["string", "number", "boolean"] },
+        "choices": { "type": "array", "items": { "type": "string" } },
+        "hidden": { "type": "boolean", "default": false },
+        "group": { "type": "string" }
+      }
+    },
+    "FunctionParameter": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": [
+            "object",
+            "behavior",
+            "expression",
+            "string",
+            "boolean",
+            "currentScene",
+            "layer",
+            "color",
+            "key",
+            "file"
+          ]
+        },
+        "description": { "type": "string" },
+        "longDescription": { "type": "string" },
+        "optional": { "type": "boolean", "default": false },
+        "defaultValue": { "type": "string" }
+      }
+    },
+    "EventsFunction": {
+      "type": "object",
+      "required": ["name", "functionType"],
+      "properties": {
+        "name": { "type": "string" },
+        "fullName": { "type": "string" },
+        "description": { "type": "string" },
+        "sentence": { "type": "string" },
+        "group": { "type": "string" },
+        "functionType": {
+          "type": "string",
+          "enum": [
+            "Action",
+            "Condition",
+            "Expression",
+            "StringExpression",
+            "ExpressionAndCondition",
+            "ActionWithOperator"
+          ]
+        },
+        "expressionType": {
+          "type": "string",
+          "enum": ["number", "string", "boolean"]
+        },
+        "getterName": { "type": "string" },
+        "isPrivate": { "type": "boolean", "default": false },
+        "isAsync": { "type": "boolean", "default": false },
+        "parameters": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/FunctionParameter" },
+          "default": []
+        },
+        "events": { "type": "array", "items": { "type": "object" }, "default": [] },
+        "useJsCode": { "type": "boolean", "default": false },
+        "jsCode": { "type": "string" }
+      }
+    },
+    "EventsBasedBehavior": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "fullName": { "type": "string" },
+        "description": { "type": "string" },
+        "objectType": { "type": "string", "default": "" },
+        "isPrivate": { "type": "boolean", "default": false },
+        "properties": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/PropertyDescriptor" },
+          "default": []
+        },
+        "sharedProperties": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/PropertyDescriptor" },
+          "default": []
+        },
+        "eventsFunctions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/EventsFunction" },
+          "default": []
+        }
+      }
+    },
+    "EventsBasedObject": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "fullName": { "type": "string" },
+        "description": { "type": "string" },
+        "defaultName": { "type": "string" },
+        "isRenderedIn3D": { "type": "boolean", "default": false },
+        "isAnimatable": { "type": "boolean", "default": false },
+        "isTextContainer": { "type": "boolean", "default": false },
+        "area": {
+          "type": "object",
+          "properties": {
+            "minX": { "type": "number", "default": 0 },
+            "minY": { "type": "number", "default": 0 },
+            "minZ": { "type": "number", "default": 0 },
+            "maxX": { "type": "number", "default": 32 },
+            "maxY": { "type": "number", "default": 32 },
+            "maxZ": { "type": "number", "default": 32 }
+          }
+        },
+        "objects": { "type": "array", "items": { "type": "object" }, "default": [] },
+        "layers": { "type": "array", "items": { "type": "object" }, "default": [] },
+        "initialInstances": { "type": "array", "items": { "type": "object" }, "default": [] },
+        "properties": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/PropertyDescriptor" },
+          "default": []
+        },
+        "eventsFunctions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/EventsFunction" },
+          "default": []
+        }
+      }
+    },
+    "Dependency": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "exportName": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    }
+  }
+}

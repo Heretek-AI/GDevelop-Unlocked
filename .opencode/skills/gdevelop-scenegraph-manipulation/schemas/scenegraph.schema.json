@@ -1,0 +1,133 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GDevelopSceneGraphSchema",
+  "description": "Schema for GDevelop 5 Scenes, Layers, Cameras, Lighting, and 2D/3D Instances.",
+  "type": "object",
+  "required": ["name", "layers", "instances"],
+  "properties": {
+    "name": { "type": "string" },
+    "title": { "type": "string" },
+    "backgroundColor": { "type": "string" },
+    "stopSoundsOnStartup": { "type": "boolean", "default": true },
+    "layers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Layer" },
+      "default": []
+    },
+    "instances": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/InitialInstance" },
+      "default": []
+    },
+    "objects": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/SceneObject" },
+      "default": []
+    },
+    "variables": {
+      "type": "array",
+      "items": { "type": "object" },
+      "default": []
+    }
+  },
+  "definitions": {
+    "Camera": {
+      "type": "object",
+      "properties": {
+        "defaultSize": { "type": "boolean", "default": true },
+        "defaultViewport": { "type": "boolean", "default": true },
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "viewportX1": { "type": "number", "minimum": 0, "maximum": 1, "default": 0 },
+        "viewportY1": { "type": "number", "minimum": 0, "maximum": 1, "default": 0 },
+        "viewportX2": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+        "viewportY2": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 }
+      }
+    },
+    "LayerEffect": {
+      "type": "object",
+      "required": ["name", "effectType"],
+      "properties": {
+        "name": { "type": "string" },
+        "effectType": { "type": "string" },
+        "doubleParameters": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        },
+        "stringParameters": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "booleanParameters": {
+          "type": "object",
+          "additionalProperties": { "type": "boolean" }
+        }
+      }
+    },
+    "Layer": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "visibility": { "type": "boolean", "default": true },
+        "isLocked": { "type": "boolean", "default": false },
+        "renderingType": {
+          "type": "string",
+          "enum": ["2d", "3d"],
+          "default": "2d"
+        },
+        "isLightingLayer": { "type": "boolean", "default": false },
+        "followBaseLayerCamera": { "type": "boolean", "default": true },
+        "camera3DNearPlaneDistance": { "type": "number", "default": 0.1 },
+        "camera3DFarPlaneDistance": { "type": "number", "default": 2000 },
+        "camera3DFieldOfView": { "type": "number", "default": 45 },
+        "camera2DPlaneMaxDrawingDistance": { "type": "number" },
+        "cameras": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Camera" },
+          "default": []
+        },
+        "effects": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/LayerEffect" },
+          "default": []
+        }
+      }
+    },
+    "InitialInstance": {
+      "type": "object",
+      "required": ["name", "x", "y"],
+      "properties": {
+        "name": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number", "default": 0 },
+        "angle": { "type": "number", "default": 0 },
+        "rotationX": { "type": "number", "default": 0 },
+        "rotationY": { "type": "number", "default": 0 },
+        "rotationZ": { "type": "number", "default": 0 },
+        "layer": { "type": "string", "default": "" },
+        "zOrder": { "type": "integer", "default": 1 },
+        "customSize": { "type": "boolean", "default": false },
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "depth": { "type": "number" },
+        "locked": { "type": "boolean", "default": false },
+        "sealed": { "type": "boolean", "default": false },
+        "variables": { "type": "array", "items": { "type": "object" }, "default": [] },
+        "initialProperties": { "type": "object" }
+      }
+    },
+    "SceneObject": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "variables": { "type": "array", "items": { "type": "object" } },
+        "behaviors": { "type": "array", "items": { "type": "object" } },
+        "effects": { "type": "array", "items": { "type": "object" } }
+      }
+    }
+  }
+}

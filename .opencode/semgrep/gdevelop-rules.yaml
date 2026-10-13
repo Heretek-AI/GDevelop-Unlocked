@@ -1,0 +1,45 @@
+rules:
+  - id: gdevelop-unawaited-editor-script
+    patterns:
+      - pattern-either:
+          - pattern: create_or_replace_object(...)
+          - pattern: add_behavior(...)
+          - pattern: put_2d_instances(...)
+          - pattern: put_3d_instances(...)
+          - pattern: change_scene_properties_layers_effects_groups(...)
+          - pattern: change_object_properties_effects(...)
+          - pattern: change_behavior_property(...)
+          - pattern: add_or_edit_variable(...)
+      - pattern-not-inside: await ...
+    message: "GDevelop Editor Script Error: Exposed editor functions in run_script MUST be sequentially awaited with 'await'. Unawaited calls execute concurrently or drop return values."
+    languages: [javascript, typescript]
+    severity: ERROR
+
+  - id: gdevelop-no-hosted-egress
+    patterns:
+      - pattern-either:
+          - pattern-regex: 'https?://[a-zA-Z0-9.-]*gdevelop\.io/.*'
+          - pattern: GDevelopGenerationApi.baseUrl
+    paths:
+      include:
+        - "**/packages/unlock-shim/**"
+        - "**/packages/opencode-provider/**"
+        - "**/packages/opencode-gdevelop/**"
+    message: "Zero-Egress Security Gate: Hosted GDevelop generation API endpoint detected in local BYOK harness code. Local mods must never touch hosted endpoints."
+    languages: [javascript, typescript]
+    severity: ERROR
+
+  - id: gdevelop-direct-game-json-mutation
+    patterns:
+      - pattern-either:
+          - pattern: fs.writeFileSync($PATH, ...)
+          - pattern: fs.promises.writeFile($PATH, ...)
+      - pattern-regex: 'game\.json'
+    paths:
+      exclude:
+        - "**/packages/unlock-shim/control-shim.mjs"
+        - "**/tests/**"
+        - "**/review/**"
+    message: "Architecture Adherence: Direct write to game.json detected. All project AST mutations must delegate to packages/unlock-shim/control-shim.mjs or gdevelop_* tools."
+    languages: [javascript, typescript]
+    severity: WARNING
