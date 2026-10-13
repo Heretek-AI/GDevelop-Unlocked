@@ -17,10 +17,15 @@
  } from './AiRequestUtils';
  import { useEnsureExtensionInstalled } from './UseEnsureExtensionInstalled';
  import { useGenerateEvents } from './UseGenerateEvents';
-@@ -62,6 +63,39 @@
+@@ -62,6 +63,44 @@
  import { makeSimplifiedProjectBuilder } from '../EditorFunctions/SimplifiedProject/SimplifiedProject';
  import { prepareAiUserContent } from './PrepareAiUserContent';
  import { extractGDevelopApiErrorStatusAndCode } from '../Utils/GDevelopServices/Errors';
++import {
++  listAllPublicAssets,
++  listAllResources,
++  type AssetShortHeader,
++} from '../Utils/GDevelopServices/Asset';
 +import {
 +  isCustomEndpointEnabled,
 +  LOCAL_BYOK_USER_ID,
@@ -57,7 +62,373 @@
  import UnsavedChangesContext from '../MainFrame/UnsavedChangesContext';
  import {
    type FileMetadata,
-@@ -213,12 +247,10 @@
+@@ -73,6 +112,365 @@
+ 
+ const gd: libGDevelop = global.gd;
+ 
++let cachedPublicAssets: ?Array<AssetShortHeader> = null;
++let cachedPublicAssetsPromise: ?Promise<?Array<AssetShortHeader>> = null;
++
++const fetchPublicAssets = async (): Promise<?Array<AssetShortHeader>> => {
++  if (cachedPublicAssets) return cachedPublicAssets;
++  if (cachedPublicAssetsPromise) return cachedPublicAssetsPromise;
++  cachedPublicAssetsPromise = (async () => {
++    try {
++      const response = await listAllPublicAssets({ environment: 'live' });
++      if (response && Array.isArray(response.publicAssetShortHeaders)) {
++        cachedPublicAssets = response.publicAssetShortHeaders;
++        return cachedPublicAssets;
++      }
++    } catch (error) {
++      console.warn('[BYOK] Could not fetch public assets store:', error);
++    } finally {
++      cachedPublicAssetsPromise = null;
++    }
++    return null;
++  })();
++  return cachedPublicAssetsPromise;
++};
++
++const searchClientPublicAssets = async (args: any): Promise<Object> => {
++  const query = (args && typeof args.query === 'string' ? args.query : '')
++    .trim()
++    .toLowerCase();
++  const category = (args && typeof args.category === 'string'
++    ? args.category
++    : ''
++  )
++    .trim()
++    .toLowerCase();
++
++  const allAssets = await fetchPublicAssets();
++  if (!allAssets) {
++    return {
++      success: true,
++      count: 0,
++      assets: [],
++      message:
++        'Asset store search is currently offline or unreachable. You can create objects directly using create_or_replace_object with object_type (e.g. "Sprite", "TextObject::Text", "PanelSpriteObject::PanelSprite").',
++    };
++  }
++
++  const queryWords = query.split(/\s+/).filter(Boolean);
++  const matched = allAssets.filter(asset => {
++    if (category) {
++      const matchesCategory =
++        (asset.objectType &&
++          asset.objectType.toLowerCase().includes(category)) ||
++        (Array.isArray(asset.tags) &&
++          asset.tags.some(tag => tag.toLowerCase().includes(category)));
++      if (!matchesCategory) return false;
++    }
++    if (queryWords.length === 0) return true;
++    const nameLower = (asset.name || '').toLowerCase();
++    const descLower = (asset.shortDescription || '').toLowerCase();
++    const typeLower = (asset.objectType || '').toLowerCase();
++    const tagsLower = (asset.tags || []).map(t => t.toLowerCase());
++
++    return queryWords.every(
++      word =>
++        nameLower.includes(word) ||
++        descLower.includes(word) ||
++        typeLower.includes(word) ||
++        tagsLower.some(t => t.includes(word))
++    );
++  });
++
++  const results = matched.slice(0, 20).map(asset => ({
++    id: asset.id,
++    name: asset.name,
++    shortDescription: asset.shortDescription || '',
++    objectType: asset.objectType || '',
++    tags: asset.tags || [],
++  }));
++
++  return {
++    success: true,
++    count: results.length,
++    assets: results,
++    ...(results.length === 0
++      ? {
++          message: `No public assets found matching "${query}". You can create objects directly using create_or_replace_object with object_type (e.g. "Sprite", "TextObject::Text", "PanelSpriteObject::PanelSprite").`,
++        }
++      : {}),
++  };
++};
++
++let cachedResources: ?Array<any> = null;
++let cachedResourcesPromise: ?Promise<?Array<any>> = null;
++
++const fetchResources = async (): Promise<?Array<any>> => {
++  if (cachedResources) return cachedResources;
++  if (cachedResourcesPromise) return cachedResourcesPromise;
++  cachedResourcesPromise = (async () => {
++    try {
++      const response = await listAllResources({ environment: 'live' });
++      if (response) {
++        const list = [
++          ...(Array.isArray(response.resources) ? response.resources : []),
++          ...(Array.isArray(response.resourcesV2) ? response.resourcesV2 : []),
++        ];
++        cachedResources = list;
++        return cachedResources;
++      }
++    } catch (error) {
++      console.warn('[BYOK] Could not fetch resources store:', error);
++    } finally {
++      cachedResourcesPromise = null;
++    }
++    return null;
++  })();
++  return cachedResourcesPromise;
++};
++
++const searchClientResources = async (args: any): Promise<Object> => {
++  const query = (args && typeof args.query === 'string' ? args.query : '')
++    .trim()
++    .toLowerCase();
++  const resourceKind = (args && typeof args.resource_kind === 'string'
++    ? args.resource_kind
++    : ''
++  )
++    .trim()
++    .toLowerCase();
++
++  const allResources = await fetchResources();
++  if (!allResources) {
++    return {
++      success: true,
++      count: 0,
++      resources: [],
++      message:
++        'Resource store search is currently offline or unreachable. Existing project resources can be inspected via inspect_project_properties_resources.',
++    };
++  }
++
++  const queryWords = query.split(/\s+/).filter(Boolean);
++  const matched = allResources.filter(resource => {
++    if (resourceKind) {
++      const matchesKind =
++        (resource.type &&
++          resource.type.toLowerCase().includes(resourceKind)) ||
++        (resourceKind === 'audio' &&
++          (resource.type === 'music' || resource.type === 'sound'));
++      if (!matchesKind) return false;
++    }
++    if (queryWords.length === 0) return true;
++    const nameLower = (resource.name || '').toLowerCase();
++    const tagsLower = (resource.tags || []).map(t => String(t).toLowerCase());
++
++    return queryWords.every(
++      word => nameLower.includes(word) || tagsLower.some(t => t.includes(word))
++    );
++  });
++
++  const results = matched.slice(0, 20).map(resource => ({
++    name: resource.name,
++    type: resource.type,
++    url: resource.url,
++    tags: resource.tags || [],
++  }));
++
++  return {
++    success: true,
++    count: results.length,
++    resources: results,
++    ...(results.length === 0
++      ? {
++          message: `No resources found matching "${query}".`,
++        }
++      : {}),
++  };
++};
++
++const searchInstructionsInMap = (
++  instructionsMap: any,
++  kind: 'action' | 'condition',
++  extName: string,
++  targetName: string,
++  queryWords: Array<string>,
++  matches: Array<Object>,
++  maxMatches: number
++) => {
++  if (!instructionsMap) return;
++  const types = instructionsMap.keys();
++  for (let j = 0; j < types.size(); ++j) {
++    if (matches.length >= maxMatches) break;
++    const type = types.at(j);
++    const metadata = instructionsMap.get(type);
++    if (!metadata || metadata.isHidden()) continue;
++    const fullName = metadata.getFullName() || '';
++    const desc = metadata.getDescription() || '';
++    const haystack = `${type} ${fullName} ${desc} ${extName} ${targetName}`.toLowerCase();
++    if (queryWords.every(word => haystack.includes(word))) {
++      const paramsCount = metadata.getParametersCount();
++      const params = [];
++      for (let p = 0; p < paramsCount; ++p) {
++        const param = metadata.getParameter(p);
++        params.push({
++          name: (param.getName && param.getName()) || `param${p}`,
++          type: param.getType(),
++          description: param.getDescription() || '',
++          optional: param.isOptional ? param.isOptional() : false,
++        });
++      }
++      matches.push({
++        name: type,
++        fullName,
++        type: kind,
++        extension: extName,
++        target: targetName || undefined,
++        description: desc,
++        parameters: params,
++      });
++    }
++  }
++};
++
++const searchLocalDocumentation = (query: string): ?Object => {
++  const gdGlobal = typeof global !== 'undefined' ? (global: any).gd : null;
++  if (
++    !gdGlobal ||
++    !gdGlobal.JsPlatform ||
++    !gdGlobal.JsPlatform.get ||
++    !gdGlobal.asPlatform
++  ) {
++    return null;
++  }
++  try {
++    const platform = gdGlobal.asPlatform(gdGlobal.JsPlatform.get());
++    const allExtensions = platform.getAllPlatformExtensions();
++    const normalizedQuery = (query || '').trim().toLowerCase();
++    const queryWords = normalizedQuery.split(/\s+/).filter(Boolean);
++    if (queryWords.length === 0) return null;
++
++    const matches: Array<Object> = [];
++    const maxMatches = 25;
++
++    for (let i = 0; i < allExtensions.size(); ++i) {
++      if (matches.length >= maxMatches) break;
++      const ext = allExtensions.at(i);
++      const extName = ext.getName();
++
++      // Free actions and conditions
++      searchInstructionsInMap(
++        ext.getAllActions(),
++        'action',
++        extName,
++        '',
++        queryWords,
++        matches,
++        maxMatches
++      );
++      searchInstructionsInMap(
++        ext.getAllConditions(),
++        'condition',
++        extName,
++        '',
++        queryWords,
++        matches,
++        maxMatches
++      );
++
++      // Objects actions and conditions
++      const objectsTypes = ext.getExtensionObjectsTypes();
++      for (let o = 0; o < objectsTypes.size(); ++o) {
++        if (matches.length >= maxMatches) break;
++        const objType = objectsTypes.at(o);
++        searchInstructionsInMap(
++          ext.getAllActionsForObject(objType),
++          'action',
++          extName,
++          objType,
++          queryWords,
++          matches,
++          maxMatches
++        );
++        searchInstructionsInMap(
++          ext.getAllConditionsForObject(objType),
++          'condition',
++          extName,
++          objType,
++          queryWords,
++          matches,
++          maxMatches
++        );
++      }
++
++      // Behaviors actions and conditions
++      const behaviorsTypes = ext.getBehaviorsTypes();
++      for (let b = 0; b < behaviorsTypes.size(); ++b) {
++        if (matches.length >= maxMatches) break;
++        const behType = behaviorsTypes.at(b);
++        searchInstructionsInMap(
++          ext.getAllActionsForBehavior(behType),
++          'action',
++          extName,
++          behType,
++          queryWords,
++          matches,
++          maxMatches
++        );
++        searchInstructionsInMap(
++          ext.getAllConditionsForBehavior(behType),
++          'condition',
++          extName,
++          behType,
++          queryWords,
++          matches,
++          maxMatches
++        );
++      }
++
++      // Expressions
++      const expressions = ext.getAllExpressions();
++      if (expressions) {
++        const exprKeys = expressions.keys();
++        for (let j = 0; j < exprKeys.size(); ++j) {
++          if (matches.length >= maxMatches) break;
++          const key = exprKeys.at(j);
++          const metadata = expressions.get(key);
++          if (!metadata) continue;
++          const fullName = metadata.getFullName ? metadata.getFullName() || '' : '';
++          const desc = metadata.getDescription ? metadata.getDescription() || '' : '';
++          const haystack = `${key} ${fullName} ${desc} ${extName}`.toLowerCase();
++          if (queryWords.every(word => haystack.includes(word))) {
++            matches.push({
++              name: key,
++              fullName,
++              type: 'expression',
++              extension: extName,
++              description: desc,
++            });
++          }
++        }
++      }
++    }
++
++    return {
++      success: true,
++      query,
++      count: matches.length,
++      results: matches,
++      ...(matches.length === 0
++        ? {
++            message: `No engine actions, conditions, or expressions matched "${query}".`,
++          }
++        : {}),
++    };
++  } catch (error) {
++    console.warn('[BYOK] Local documentation reflection failed:', error);
++    return null;
++  }
++};
++
++
+ // How long to keep the "Calculating..." indicator visible after a refresh
+ // completes, to prevent it from flashing on fast calls.
+ const REFRESH_LIMITS_SETTLE_DELAY_MS = 200;
+@@ -213,12 +611,10 @@
    editorCallbacks: EditorCallbacks,
  |}): React.Node => {
    if (aiRequest.parentAiRequestId) {
@@ -74,7 +445,7 @@
      if (launchingCall) {
        return renderFunctionCallLabel({
          functionCall: launchingCall,
-@@ -244,6 +276,7 @@
+@@ -244,6 +640,7 @@
    editorCallbacks,
    aiRequestsToProcess,
    onSendEditorFunctionCallResults,
@@ -82,7 +453,7 @@
    getEditorFunctionCallResults,
    addEditorFunctionCallResults,
    onSceneEventsModifiedOutsideEditor,
-@@ -265,6 +298,9 @@
+@@ -265,6 +662,9 @@
    suspendAiRequest,
    requestEditApproval,
    onSaveProjectAsWithStorageProvider,
@@ -92,7 +463,7 @@
  }: {|
    i18n: I18nType,
    project: ?gdProject,
-@@ -280,7 +316,7 @@
+@@ -280,7 +680,7 @@
        createdExternalLayoutNames?: Array<string>,
        createdProject?: ?gdProject,
      |}
@@ -101,7 +472,7 @@
    getEditorFunctionCallResults: string => Array<EditorFunctionCallResult> | null,
    addEditorFunctionCallResults: (
      string,
-@@ -319,6 +355,9 @@
+@@ -319,6 +719,9 @@
    onWillInstallExtension: (extensionNames: Array<string>) => void,
    onExtensionInstalled: (extensionNames: Array<string>) => void,
    isReadyToProcessFunctionCalls: boolean,
@@ -111,7 +482,7 @@
    getIsAutoEditEnabled: () => boolean,
    suspendAiRequest: (aiRequestId: string) => Promise<void>,
    requestEditApproval: (request: EditApprovalRequest) => Promise<boolean>,
-@@ -331,12 +370,30 @@
+@@ -331,12 +734,30 @@
        createdProject?: gdProject,
      |}
    ) => Promise<?FileMetadata>,
@@ -142,7 +513,7 @@
  } => {
    const { ensureExtensionInstalled } = useEnsureExtensionInstalled({
      project,
-@@ -424,6 +481,14 @@
+@@ -424,6 +845,14 @@
    // `call:<callId>` (for a single direct modifying call like generate_events).
    const approvedEditBatchKeysRef = React.useRef<Set<string>>(new Set());
  
@@ -157,7 +528,7 @@
    // Forget all previously-granted edit approvals so the next modifying call
    // asks again. Called when the user toggles auto-edit: turning it on then off
    // again means they want to review the upcoming edits, even within a sub-agent
-@@ -440,6 +505,16 @@
+@@ -440,6 +869,16 @@
        if (!isReadyToProcessFunctionCalls) return;
        if (aiRequest.status === 'suspended') return;
  
@@ -174,7 +545,7 @@
        const functionCallsToProcess = functionCalls.filter(
          functionCall =>
            !inFlightFunctionCallIdsRef.current.has(
-@@ -460,14 +535,60 @@
+@@ -460,14 +899,60 @@
          );
        });
  
@@ -237,7 +608,7 @@
  
        // Gate project-modifying calls behind a user confirmation when auto-edit
        // is off. Read-only calls (exploration, inspection) always run. The first
-@@ -493,10 +614,16 @@
+@@ -493,10 +978,16 @@
          const modifyingFunctionCalls = functionCallsToProcess.filter(
            functionCall =>
              doesFunctionCallModifyProject(functionCall) &&
@@ -254,7 +625,7 @@
              !isCallApproved(functionCall)
          );
  
-@@ -554,13 +681,409 @@
+@@ -554,13 +1045,634 @@
          }
        }
  
@@ -412,6 +783,8 @@
 +      const offlineDocsResults: Array<EditorFunctionCallResult> = [];
 +      const localPlanHandledCallIds = new Set<string>();
 +      const localPlanResults: Array<EditorFunctionCallResult> = [];
++      const localStoreSearchHandledCallIds = new Set<string>();
++      const localStoreSearchResults: Array<EditorFunctionCallResult> = [];
 +      if (isCustomEndpointEnabled()) {
 +        for (const functionCall of functionCallsToProcess) {
 +          if (studioDeniedCallIds.has(functionCall.call_id)) continue;
@@ -424,17 +797,37 @@
 +              isOfflineDocsTool(functionCall.name));
 +          if (isDocs) {
 +            offlineDocsHandledCallIds.add(functionCall.call_id);
-+            const docsDenial = {
-+              status: 'finished',
-+              call_id: functionCall.call_id,
-+              success: false,
-+              output: {
-+                message: `${OFFLINE_DOCS_MESSAGE} (tool: ${functionCall.name})`,
-+                offline: true,
-+              },
-+            };
-+            offlineDocsResults.push(docsDenial);
-+            addEditorFunctionCallResults(aiRequest.id, [docsDenial]);
++            let localDocsResult = null;
++            if (functionCall.name === 'search_docs') {
++              try {
++                const parsedDocsArgs = JSON.parse(
++                  functionCall.arguments || '{}'
++                );
++                localDocsResult = searchLocalDocumentation(
++                  parsedDocsArgs.query || ''
++                );
++              } catch (e) {
++                // Ignore parse error
++              }
++            }
++            const docsResult = localDocsResult
++              ? {
++                  status: 'finished',
++                  call_id: functionCall.call_id,
++                  success: true,
++                  output: localDocsResult,
++                }
++              : {
++                  status: 'finished',
++                  call_id: functionCall.call_id,
++                  success: false,
++                  output: {
++                    message: `${OFFLINE_DOCS_MESSAGE} (tool: ${functionCall.name})`,
++                    offline: true,
++                  },
++                };
++            offlineDocsResults.push(docsResult);
++            addEditorFunctionCallResults(aiRequest.id, [docsResult]);
 +            continue;
 +          }
 +          const isPlan =
@@ -483,6 +876,55 @@
 +            }
 +            localPlanResults.push(planResult);
 +            addEditorFunctionCallResults(aiRequest.id, [planResult]);
++            continue;
++          }
++          if (functionCall.name === 'search_object_asset_store') {
++            localStoreSearchHandledCallIds.add(functionCall.call_id);
++            let resultOutput;
++            try {
++              const parsedArgs = JSON.parse(functionCall.arguments || '{}');
++              resultOutput = await searchClientPublicAssets(parsedArgs);
++            } catch (error) {
++              resultOutput = {
++                success: true,
++                count: 0,
++                assets: [],
++                message: 'Failed to parse search arguments.',
++              };
++            }
++            const storeResult = {
++              status: 'finished',
++              call_id: functionCall.call_id,
++              success: true,
++              output: resultOutput,
++            };
++            localStoreSearchResults.push(storeResult);
++            addEditorFunctionCallResults(aiRequest.id, [storeResult]);
++            continue;
++          }
++          if (functionCall.name === 'search_resource_store') {
++            localStoreSearchHandledCallIds.add(functionCall.call_id);
++            let resultOutput;
++            try {
++              const parsedArgs = JSON.parse(functionCall.arguments || '{}');
++              resultOutput = await searchClientResources(parsedArgs);
++            } catch (error) {
++              resultOutput = {
++                success: true,
++                count: 0,
++                resources: [],
++                message: 'Failed to parse search arguments.',
++              };
++            }
++            const storeResult = {
++              status: 'finished',
++              call_id: functionCall.call_id,
++              success: true,
++              output: resultOutput,
++            };
++            localStoreSearchResults.push(storeResult);
++            addEditorFunctionCallResults(aiRequest.id, [storeResult]);
++            continue;
 +          }
 +        }
 +      }
@@ -623,20 +1065,172 @@
 +          !studioDeniedCallIds.has(functionCall.call_id) &&
 +          !offlineDocsHandledCallIds.has(functionCall.call_id) &&
 +          !localPlanHandledCallIds.has(functionCall.call_id) &&
-+          !noProjectHandledCallIds.has(functionCall.call_id)
++          !noProjectHandledCallIds.has(functionCall.call_id) &&
++          !localStoreSearchHandledCallIds.has(functionCall.call_id)
 +      );
++
++      // Parameter normalization and direct placement handling:
++      const directInstanceHandledCallIds = new Set<string>();
++      const directInstanceResults: Array<EditorFunctionCallResult> = [];
++
++      for (const call of callsForEditor) {
++        if (
++          call.name === 'add_or_edit_variable' &&
++          typeof call.arguments === 'string'
++        ) {
++          try {
++            const parsedArgs = JSON.parse(call.arguments);
++            let modified = false;
++            if (parsedArgs.name && !parsedArgs.variable_name_or_path) {
++              parsedArgs.variable_name_or_path = parsedArgs.name;
++              modified = true;
++            }
++            if (parsedArgs.scope && !parsedArgs.variable_scope) {
++              parsedArgs.variable_scope = parsedArgs.scope;
++              modified = true;
++            }
++            if (parsedArgs.type && !parsedArgs.variable_type) {
++              parsedArgs.variable_type = parsedArgs.type;
++              modified = true;
++            }
++            if (parsedArgs.value === undefined || parsedArgs.value === null) {
++              parsedArgs.value = '';
++              modified = true;
++            }
++            if (Array.isArray(parsedArgs.variables)) {
++              for (const v of parsedArgs.variables) {
++                if (v && typeof v === 'object') {
++                  if (v.name && !v.variable_name_or_path) {
++                    v.variable_name_or_path = v.name;
++                    modified = true;
++                  }
++                  if (v.type && !v.variable_type) {
++                    v.variable_type = v.type;
++                    modified = true;
++                  }
++                  if (v.value === undefined || v.value === null) {
++                    v.value = '';
++                    modified = true;
++                  }
++                }
++              }
++            }
++            if (modified) {
++              call.arguments = JSON.stringify(parsedArgs);
++            }
++          } catch (e) {
++            // Ignore parse errors, handled downstream
++          }
++        } else if (
++          call.name === 'put_2d_instances' &&
++          typeof call.arguments === 'string'
++        ) {
++          try {
++            const parsedArgs = JSON.parse(call.arguments);
++            let modified = false;
++            if (
++              parsedArgs.layer_name === undefined ||
++              parsedArgs.layer_name === null
++            ) {
++              parsedArgs.layer_name = '';
++              modified = true;
++            }
++            if (
++              parsedArgs.brush_kind === undefined ||
++              parsedArgs.brush_kind === null
++            ) {
++              parsedArgs.brush_kind = parsedArgs.brush_position
++                ? 'point'
++                : 'none';
++              modified = true;
++            }
++            // If the model supplied a batch of instances directly:
++            if (
++              Array.isArray(parsedArgs.instances) &&
++              parsedArgs.instances.length > 0 &&
++              project
++            ) {
++              const sceneName =
++                parsedArgs.scene_name ||
++                (project.hasAnyLayout() ? project.getLayoutAt(0).getName() : null);
++              if (sceneName && project.hasLayoutNamed(sceneName)) {
++                const layout = project.getLayout(sceneName);
++                const initialInstances = layout.getInitialInstances();
++                let placedCount = 0;
++                for (const instData of parsedArgs.instances) {
++                  if (instData && instData.object_name) {
++                    const inst = initialInstances.insertNewInitialInstance();
++                    inst.setObjectName(instData.object_name);
++                    inst.setX(
++                      typeof instData.x === 'number'
++                        ? instData.x
++                        : parseFloat(instData.x) || 0
++                    );
++                    inst.setY(
++                      typeof instData.y === 'number'
++                        ? instData.y
++                        : parseFloat(instData.y) || 0
++                    );
++                    inst.setZOrder(
++                      typeof instData.z_order === 'number'
++                        ? instData.z_order
++                        : 1
++                    );
++                    inst.setAngle(
++                      typeof instData.angle === 'number'
++                        ? instData.angle
++                        : 0
++                    );
++                    inst.setLayer(
++                      typeof instData.layer_name === 'string'
++                        ? instData.layer_name
++                        : parsedArgs.layer_name || ''
++                    );
++                    placedCount++;
++                  }
++                }
++                onInstancesModifiedOutsideEditor({
++                  target: { type: 'scene', sceneName },
++                });
++                directInstanceHandledCallIds.add(call.call_id);
++                const instanceResult = {
++                  status: 'finished',
++                  call_id: call.call_id,
++                  success: true,
++                  output: {
++                    message: `Placed ${placedCount} instances in scene "${sceneName}".`,
++                    placedCount,
++                  },
++                };
++                directInstanceResults.push(instanceResult);
++                addEditorFunctionCallResults(aiRequest.id, [instanceResult]);
++              }
++            }
++            if (modified) {
++              call.arguments = JSON.stringify(parsedArgs);
++            }
++          } catch (e) {
++            // Ignore parse errors, handled downstream
++          }
++        }
++      }
++
++      const dispatchedCallsForEditor = callsForEditor.filter(
++        functionCall => !directInstanceHandledCallIds.has(functionCall.call_id)
++      );
++
 +      // Mark only the editor calls as "working": a spawn (or a loop-guard hit)
 +      // already has a terminal result, and a permanent "working" entry would
 +      // make `hasUnfinishedResult` silently drop sibling sends.
        addEditorFunctionCallResults(
          aiRequest.id,
 -        functionCallsToProcess.map(functionCall => ({
-+        callsForEditor.map(functionCall => ({
++        dispatchedCallsForEditor.map(functionCall => ({
            status: 'working',
            call_id: functionCall.call_id,
          }))
        );
-+      if (callsForEditor.length === 0) {
++      if (dispatchedCallsForEditor.length === 0) {
 +        // Nothing left for the editor: surface the role denials and any spawn
 +        // failures to the model (they are already recorded but not yet sent),
 +        // then release the locks. Without this a denied-only batch loops.
@@ -647,6 +1241,8 @@
 +          ...offlineDocsResults,
 +          ...localPlanResults,
 +          ...noProjectResults,
++          ...localStoreSearchResults,
++          ...directInstanceResults,
 +        ];
 +        if (outcomeResults.length > 0) {
 +          await onSendEditorFunctionCallResults(
@@ -665,16 +1261,16 @@
  
        // The "modified outside editor" callbacks each refresh the editor and can
        // trigger an in-game editor hot reload. Firing them once per function
-@@ -669,7 +1192,7 @@
+@@ -669,7 +1781,7 @@
            // Explorer sub-agent scripts are read-only: restrict their
            // `run_script` to non-mutating functions (defense in depth).
            runScriptReadOnly: isReadOnlyScriptContext,
 -          functionCalls: functionCallsToProcess.map(functionCall => ({
-+          functionCalls: callsForEditor.map(functionCall => ({
++          functionCalls: dispatchedCallsForEditor.map(functionCall => ({
              name: functionCall.name,
              arguments: functionCall.arguments,
              call_id: functionCall.call_id,
-@@ -761,13 +1284,65 @@
+@@ -761,13 +1873,67 @@
            return;
          }
  
@@ -688,7 +1284,7 @@
 +        // serially instead of suspending.
 +        if (guard) {
 +          const editorCallIds = new Set(
-+            callsForEditor.map(functionCall => functionCall.call_id)
++            dispatchedCallsForEditor.map(functionCall => functionCall.call_id)
 +          );
 +          results.forEach(result => {
 +            if (result.status !== 'finished') return;
@@ -731,6 +1327,8 @@
 +            ...offlineDocsResults,
 +            ...localPlanResults,
 +            ...noProjectResults,
++            ...localStoreSearchResults,
++            ...directInstanceResults,
 +            ...mergedResults,
 +          ],
 +          {
@@ -745,7 +1343,7 @@
        } finally {
          // Flush the coalesced editor notifications for everything modified in
          // this batch (one hot reload instead of one per call). In `finally` so
-@@ -787,7 +1362,9 @@
+@@ -787,7 +1953,9 @@
          }
  
          // Release the lock so these calls can be retried if needed
@@ -756,7 +1354,7 @@
          functionCallsToProcess.forEach(functionCall => {
            inFlightFunctionCallIdsRef.current.delete(
              `${aiRequest.id}:${functionCall.call_id}`
-@@ -824,9 +1401,12 @@
+@@ -824,9 +1992,12 @@
        getAssetStoreTagForNewObject,
        generateEvents,
        onSendEditorFunctionCallResults,
@@ -769,7 +1367,7 @@
      ]
    );
  
-@@ -870,9 +1450,50 @@
+@@ -870,9 +2041,50 @@
      [onProcessFunctionCalls, allFunctionCallsToProcess]
    );
  
@@ -820,7 +1418,7 @@
    };
  };
  
-@@ -977,7 +1598,6 @@
+@@ -977,7 +2189,6 @@
      editorFunctionCallResultsStorage,
      isFetchingSuggestions,
      setIsFetchingSuggestions,
@@ -828,7 +1426,7 @@
      setSelectedAiRequestId,
      selectedAiRequest,
    } = React.useContext(AiRequestContext);
-@@ -1036,20 +1656,19 @@
+@@ -1036,20 +2247,19 @@
          // Then ask for some.
          if (
            !selectedAiRequest ||
@@ -860,7 +1458,7 @@
  
          // Check if there are tools being run. If so, no suggestions at this time.
          const hasFunctionsCallsToProcess =
-@@ -1139,7 +1758,7 @@
+@@ -1139,7 +2349,7 @@
            : null;
          const preparedAiUserContent = await prepareAiUserContent({
            getAuthorizationHeader,
@@ -869,7 +1467,7 @@
            simplifiedProjectJson,
            projectSpecificExtensionsSummaryJson,
            eventsJson: null,
-@@ -1153,7 +1772,7 @@
+@@ -1153,7 +2363,7 @@
            const aiRequestWorkingForSuggestions = await getAiRequestSuggestions(
              getAuthorizationHeader,
              {
@@ -878,7 +1476,7 @@
                aiRequestId: selectedAiRequest.id,
                suggestionsType: isLastMessageFunctionCallOutputProjectInitialization
                  ? 'list-with-explanations'
-@@ -1525,39 +2144,12 @@
+@@ -1525,39 +2735,12 @@
      [profile, setSelectedAiRequestId]
    );
  

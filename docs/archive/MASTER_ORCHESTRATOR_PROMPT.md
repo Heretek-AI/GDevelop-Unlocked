@@ -30,7 +30,7 @@ OWNER DECISIONS (fixed):
 HOW TO USE:
 1. Ensure OpenCode config allows 3 levels of subagents:
    Set `experimental.subagent_depth: 3` in OpenCode configuration (see review/opencode/packages/core/src/tool/plugin/subagent.ts).
-2. Start an OpenCode session in /home/john/Projects/GDevelop-Unlocked.
+2. Start an OpenCode session in the repository root.
 3. Paste this ENTIRE file into the session turn.
 -->
 
@@ -369,7 +369,7 @@ Wave 5: Phase 4 (E2E & Release Readiness)    T11 ──► T12 ──► T13 (Dr
 subagent({
   agent: "general-purpose",
   description: "Phase 1 AI Studio Manager",
-  prompt: `You are the Phase 1 Manager for GDevelop Unlocked in /home/john/Projects/GDevelop-Unlocked.
+  prompt: `You are the Phase 1 Manager for GDevelop Unlocked in the repository root.
 Integration branch: integration/v0.2. Tickets: T03, then T04, then T05, then T06.
 Follow the Constitution (Section I) strictly:
 1. For each ready ticket, spawn a Ticket Squad Lead (at most 3 worktrees at once).

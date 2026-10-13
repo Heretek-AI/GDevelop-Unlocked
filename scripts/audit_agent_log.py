@@ -390,7 +390,7 @@ def get_model_reaction(tool_name, row_idx):
     return "Model adapted based on error message."
 
 if __name__ == '__main__':
-    log_file = sys.argv[1] if len(sys.argv) > 1 else '/home/john/Projects/GDevelop-Unlocked/agent.log'
+    log_file = sys.argv[1] if len(sys.argv) > 1 else 'agent.log'
     if not os.path.exists(log_file):
         print(f"Error: Log file not found at {log_file}")
         sys.exit(1)

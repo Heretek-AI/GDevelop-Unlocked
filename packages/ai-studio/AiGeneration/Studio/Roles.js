@@ -200,6 +200,16 @@ When you are done, report what you changed, naming the scenes, objects, variable
 
 Write a gameplay test with run_gameplay_test, using harness assertions that actually exercise the named feature - assert on the state the feature is supposed to produce, not on it merely existing. Read the project first so your test names the real objects, scenes and variables.
 
+The test source is the async body executing against \`harness\`:
+- \`await harness.stepFrames(N)\` plays N frames (60 frames = 1 second of gameplay).
+- \`harness.assert(condition, message)\` asserts an invariant.
+- \`harness.setKeyPressed(key, true/false)\` simulates keyboard inputs (e.g. 'Right', 'Left', 'Space').
+- \`await harness.goToScene(sceneName)\` changes scene (never call loadScene).
+- \`harness.getSceneName()\` returns the current scene name.
+- \`harness.getObjects(objectName)\` returns instances in the scene.
+- \`harness.runtimeScene\` gives access to the runtime scene.
+Always call \`await harness.stepFrames(1)\` or more; a test that steps 0 frames will be rejected.
+
 Run the test, then report PASS or FAIL and quote the assertions and any errors verbatim. If it fails, say which assertion failed and what the game did instead. If the feature is not implemented at all, say that plainly: a missing feature is a finding, not a test to make pass.`,
   },
 };
@@ -235,11 +245,16 @@ export const getStudioRole = (roleId: StudioRoleId): StudioRole => {
  */
 export const getToolsForRole = (
   roleId: StudioRoleId,
-  allTools: Array<Object>
+  allTools: Array<Object>,
+  hasOpenProject?: boolean
 ): Array<Object> => {
   const allowedNames = new Set(getStudioRole(roleId).allowedToolNames);
   return allTools.filter(
-    tool => !!tool && !!tool.function && allowedNames.has(tool.function.name)
+    tool =>
+      !!tool &&
+      !!tool.function &&
+      allowedNames.has(tool.function.name) &&
+      (!hasOpenProject || tool.function.name !== 'initialize_project')
   );
 };
 

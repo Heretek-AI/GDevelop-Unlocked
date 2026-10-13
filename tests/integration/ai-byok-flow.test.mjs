@@ -794,3 +794,103 @@ describe('integration: T06 storm guard isolation (child failure never suspends p
     }
   });
 });
+
+describe('integration: client-side store search, parameter aliases & engine reflection', () => {
+  it('patch 14 carries client-side asset/resource store search and reflection-based doc lookup', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const patch14 = readFileSync(resolve(root, 'patches/14-ai-utils.patch'), 'utf8');
+
+    for (const marker of [
+      'searchClientPublicAssets',
+      'searchClientResources',
+      'searchLocalDocumentation',
+      'localStoreSearchHandledCallIds',
+      'localStoreSearchResults',
+      'listAllPublicAssets',
+      'listAllResources',
+      'search_object_asset_store',
+      'search_resource_store',
+    ]) {
+      assert.ok(patch14.includes(marker), `patch 14 missing client store/doc marker: ${marker}`);
+    }
+  });
+
+  it('patch 14 normalizes variable aliases and put_2d_instances defaults', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const patch14 = readFileSync(resolve(root, 'patches/14-ai-utils.patch'), 'utf8');
+
+    // Variable parameter aliasing
+    assert.ok(
+      patch14.includes('parsedArgs.variable_name_or_path = parsedArgs.name'),
+      'patch 14 missing name -> variable_name_or_path alias'
+    );
+    assert.ok(
+      patch14.includes('v.variable_name_or_path = v.name'),
+      'patch 14 missing batch variable item name alias'
+    );
+
+    // Instance placement defaults and batch creation
+    assert.ok(
+      patch14.includes("parsedArgs.layer_name = ''"),
+      'patch 14 missing layer_name default'
+    );
+    assert.ok(
+      patch14.includes('insertNewInitialInstance'),
+      'patch 14 missing direct initial instance creation'
+    );
+    assert.ok(
+      patch14.includes('directInstanceHandledCallIds'),
+      'patch 14 missing direct instance handled tracking'
+    );
+  });
+
+  it('filters initialize_project when project is open and injects gameplay test harness API', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const client = readFileSync(
+      resolve(root, 'packages/ai-studio/AI/CustomAIClient.js'),
+      'utf8'
+    );
+    const roles = readFileSync(
+      resolve(root, 'packages/ai-studio/AiGeneration/Studio/Roles.js'),
+      'utf8'
+    );
+
+    // initialize_project filtering
+    assert.ok(
+      client.includes('tool.function.name !== \'initialize_project\''),
+      'CustomAIClient must filter initialize_project when project is open'
+    );
+    assert.ok(
+      client.includes('An existing project is already open. Do not call initialize_project'),
+      'System prompt must warn against calling initialize_project when project is open'
+    );
+    assert.ok(
+      roles.includes('(!hasOpenProject || tool.function.name !== \'initialize_project\')'),
+      'Roles.js must respect hasOpenProject filter'
+    );
+
+    // Gameplay test harness documentation
+    assert.ok(
+      client.includes('harness.stepFrames'),
+      'CustomAIClient tool schema must document harness.stepFrames'
+    );
+    assert.ok(
+      client.includes('harness.setKeyPressed'),
+      'CustomAIClient tool schema must document harness.setKeyPressed'
+    );
+    assert.ok(
+      roles.includes('await harness.stepFrames(N)'),
+      'Roles.js tester role must document harness API'
+    );
+  });
+});
+

@@ -1419,6 +1419,16 @@ export const GDEVELOP_OPENAI_TOOLS: Array<{|
             type: 'string',
             description: 'Name of the scene.',
           },
+          layer_name: {
+            type: 'string',
+            description:
+              'Layer name (default empty string "" for the base layer).',
+          },
+          brush_kind: {
+            type: 'string',
+            description:
+              'Placement brush kind: "point" or "none" (default "point").',
+          },
           instances: {
             type: 'array',
             items: {
@@ -1446,7 +1456,7 @@ export const GDEVELOP_OPENAI_TOOLS: Array<{|
             description: 'List of instances to place.',
           },
         },
-        required: ['scene_name', 'instances'],
+        required: ['scene_name'],
       },
     },
   },
@@ -2087,7 +2097,7 @@ export const GDEVELOP_OPENAI_TOOLS: Array<{|
     function: {
       name: 'search_docs',
       description:
-        'Search GDevelop documentation for functions, behaviors, and instructions. [Offline in local BYOK mode: rely on internal GDevelop knowledge and on-project verification]',
+        'Search GDevelop documentation and action/condition/expression engine reflection for behaviors, objects, and instructions.',
       parameters: {
         type: 'object',
         properties: {
@@ -2201,7 +2211,7 @@ export const GDEVELOP_OPENAI_TOOLS: Array<{|
     function: {
       name: 'run_gameplay_test',
       description:
-        'Run or save a gameplay test in the project or an extension.',
+        'Run or save a gameplay test in the project or an extension. Test source runs inside the game preview and receives `harness` (e.g. `await harness.stepFrames(60); harness.assert(condition, "message");`). Do NOT define a wrapper function; write statements starting with `await harness...`.',
       parameters: {
         type: 'object',
         properties: {
@@ -2218,7 +2228,8 @@ export const GDEVELOP_OPENAI_TOOLS: Array<{|
           test_name: { type: 'string', description: 'Name of the test.' },
           source: {
             type: 'string',
-            description: 'Optional test JavaScript code.',
+            description:
+              'Test JavaScript code body (the statements inside `async (harness) => { ... }`). Available harness API: `await harness.stepFrames(frames)` (run N frames; 60 = 1 sec), `await harness.step()` (run 1 frame), `harness.assert(booleanCondition, message)` (record assertion), `harness.setKeyPressed(keyName, boolean)` (simulate key, e.g. "Right", "Left", "Space"), `await harness.goToScene(sceneName)` (switch scene - never call loadScene), `harness.getSceneName()` (current scene name), `harness.getObjects(objectName)` (get scene object instances), `harness.runtimeScene` (active GDJS RuntimeScene), `harness.setMousePosition(x, y)` and `harness.setMouseButtonPressed(buttonName, boolean)`.',
           },
           persist: {
             type: 'boolean',
@@ -3099,6 +3110,7 @@ Guidelines:
   }
 
   if (gameProjectJson) {
+    prompt += `\nAn existing project is already open. Do not call initialize_project; work directly with the open project.\n`;
     prompt += `\nCurrent Project Structure:\n${gameProjectJson}\n`;
   }
   if (projectSpecificExtensionsSummaryJson) {
@@ -4103,12 +4115,25 @@ const READ_ONLY_OPENAI_TOOLS = GDEVELOP_OPENAI_TOOLS.filter(
  */
 const getToolsForStudioRequest = (
   studioRoleId: string | null | void,
-  mode: string | null | void
+  mode: string | null | void,
+  hasOpenProject?: boolean
 ): Array<Object> => {
   const { roleId, invalid } = resolveStudioRoleId(studioRoleId, mode);
-  if (invalid) return READ_ONLY_OPENAI_TOOLS;
-  if (roleId) return getToolsForRole(roleId, GDEVELOP_OPENAI_TOOLS);
-  return GDEVELOP_OPENAI_TOOLS;
+  let tools: Array<Object>;
+  if (invalid) tools = READ_ONLY_OPENAI_TOOLS;
+  else if (roleId)
+    tools = getToolsForRole(roleId, GDEVELOP_OPENAI_TOOLS, hasOpenProject);
+  else tools = GDEVELOP_OPENAI_TOOLS;
+
+  if (hasOpenProject) {
+    return tools.filter(
+      tool =>
+        !tool ||
+        !tool.function ||
+        tool.function.name !== 'initialize_project'
+    );
+  }
+  return tools;
 };
 
 /**
@@ -4601,9 +4626,10 @@ export const customCreateAiRequest = async ({
   // Same budget as later turns: a create with a large embedded project
   // structure must fit a small local model before the first request is sent.
   // Backend-resolved tools are withheld from the offer and the budget alike.
+  const hasOpenProject = Boolean(gameProjectJson);
   const createConfig = getEffectiveConfigForRequest(reqId);
   const createTools = withoutBackendOnlyTools(
-    getToolsForStudioRequest(null, mode)
+    getToolsForStudioRequest(null, mode, hasOpenProject)
   );
   const createMessageBudget = getMessageBudget(createConfig, createTools);
   let budgetedMessages = trimMessagesToBudget(
@@ -4876,8 +4902,9 @@ export const customAddMessageToAiRequest = async ({
     // the full toolset either: a read-only sub-agent (a tester) would gain
     // mutations on every later turn. Fail closed to the read-only subset. A
     // top-level request has no role at all and keeps every tool.
+    const hasOpenProject = Boolean(gameProjectJson || existing.gameProjectJson);
     const roleTools = withoutBackendOnlyTools(
-      getToolsForStudioRequest(studioRoleId, requestMode)
+      getToolsForStudioRequest(studioRoleId, requestMode, hasOpenProject)
     );
     const messageBudget = getMessageBudget(
       getEffectiveConfigForRequest(aiRequestId),
@@ -5151,9 +5178,12 @@ export const customCreateSubAgentAiRequest = async ({
     // read-only subset instead of failing open, which is why this differs from
     // the continue-turn fallback above (there the role only re-derives tools
     // for an already-created agent).
+    const hasOpenProject = Boolean(
+      gameProjectJson || (parent && parent.gameProjectJson)
+    );
     const subAgentTools = withoutBackendOnlyTools(
       isStudioRoleId(roleId)
-        ? getToolsForRole((roleId: any), GDEVELOP_OPENAI_TOOLS)
+        ? getToolsForRole((roleId: any), GDEVELOP_OPENAI_TOOLS, hasOpenProject)
         : READ_ONLY_OPENAI_TOOLS
     );
     const subAgentMessageBudget = getMessageBudget(
